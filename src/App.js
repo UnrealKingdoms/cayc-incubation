@@ -255,38 +255,52 @@ function App() {
   // then animate the medium box emerging from the triangle and moving to the right.
   useEffect(() => {
     if (selectedOption && selectedOption !== "silverback") {
-      const tl = gsap.timeline({ repeat: -1, repeatDelay: 0.3 });
+      const tl = gsap.timeline({ repeat: -1 });
+      
+      // Immediately hide the small boxes at the start of the timeline.
+      tl.set(".smallBox", { opacity: 0 });
+      
+      // Wait for 2 seconds before doing anything else.
+      tl.to({}, { duration: 1 });
+      
+      // Now set the small boxes visible before animating.
+      tl.set(".smallBox", { opacity: 1 });
+      
       // Animate small boxes: from their starting position to the left edge of the triangle.
-      // The triangle’s left edge is at ~390px (container width 490px minus triangle width 120px plus the offset).
-      // Since the small boxes start at left: 180px, the displacement is 210px.
       tl.to(".smallBox", {
         x: 250,
         duration: 1,
         stagger: 0.2,
         ease: "power1.inOut"
       })
-      // Fade out the small boxes and reset.
+      // Fade out the small boxes.
       .to(".smallBox", {
         opacity: 0,
         duration: 0.5,
         ease: "power1.inOut"
       }, "+=0.1")
-      .set(".smallBox", { x: 0, opacity: 1 })
+      // Reset small boxes.
+      .set(".smallBox", { x: 0, opacity: 0 })
       // Animate the medium box emerging from the triangle.
       .to(".mediumBox", {
         opacity: 1,
-        x: 150, // moves 150px to the right
-        duration: 1,
+        duration: 0.1
+      })
+      .to(".mediumBox", {
+        x: 250,
+        duration: 0.8,
         ease: "power1.inOut"
       })
       .to(".mediumBox", {
         opacity: 0,
-        duration: 0.5,
+        duration: 0.1,
         ease: "power1.inOut"
       })
+      // Reset the medium box.
       .set(".mediumBox", { x: 0, opacity: 0 });
     }
   }, [selectedOption]);
+  
 
   // Handle NFT selection (limit to 3)
   const handleSelectNFT = (tokenId) => {

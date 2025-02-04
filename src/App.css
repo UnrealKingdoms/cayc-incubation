@@ -79,20 +79,22 @@
 /* The medium box that emerges from the triangle.
    Initially hidden (opacity: 0) and positioned just to the right of the triangle.
    (Adjust right value as needed.) */
-.mediumBox {
-  width: 100px;
-  height: 80px;
-  background-color: white;
-  position: absolute;
-  right: -50px;  /* Start further to the right */
-  top: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  color: black;
-  opacity: 0;
-}
+   .mediumBox {
+    width: 100px;
+    height: 80px;
+    background-color: white;
+    position: absolute;
+    right: -100px;  /* moved further left than before */
+    left: +340px; 
+    top: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: black;
+    opacity: 0;
+  }
+  
 
 /* Optional overlay styles */
 .confirmation-overlay {
