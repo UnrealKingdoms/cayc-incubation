@@ -67,6 +67,32 @@ const incubationOptions = {
   },
 };
 
+// Define small-box image paths for each incubation type using the public folder
+const smallBoxImages = {
+  rarity: [
+    "/rarity_small1.png",
+    "/rarity_small2.png",
+    "/rarity_small3.png",
+  ],
+  gorilla: [
+    "/gorilla_small1.png",
+    "/gorilla_small2.png",
+    "/gorilla_small3.png",
+  ],
+  silverback: [
+    "/silverback_small1.png",
+    "/silverback_small2.png",
+    "/silverback_small3.png",
+  ],
+};
+
+// Define medium-box image paths for each incubation type using the public folder
+const mediumBoxImages = {
+  rarity: "/rarity_medium.png",
+  gorilla: "/gorilla_medium.png",
+  silverback: "/silverback_medium.png",
+};
+
 // The staging wallet to which we send each of the 3 NFTs
 const STAGING_WALLET = "0x62C72f544e414975CE8b9A8668F97750eb77DbA9";
 
@@ -88,20 +114,17 @@ function App() {
     ? incubationOptions[selectedOption]
     : null;
 
-  // Determine the text for the animated boxes based on the chosen option.
-  let smallBoxText = "";
+  // (Optional) You may still want to set a default text for the medium box,
+  // but it will be replaced by an image.
   let mediumBoxText = "";
   if (selectedOption === "rarity") {
-    // For "INCUBATE A RARITY": small boxes show "BASE" and medium box shows "RARITY"
-    smallBoxText = "BASE";
     mediumBoxText = "RARITY";
   } else if (selectedOption === "gorilla") {
-    // For "INCUBATE A GORILLA": small boxes show "RARITY" and medium box shows "GORILLA"
-    smallBoxText = "RARITY";
     mediumBoxText = "GORILLA";
+  } else if (selectedOption === "silverback") {
+    mediumBoxText = "SILVERBACK";
   }
 
-  // Connect wallet
   const connectWallet = async () => {
     if (!window.ethereum) {
       alert("Please install MetaMask or another Web3 wallet provider.");
@@ -118,7 +141,6 @@ function App() {
     }
   };
 
-  // Disconnect wallet
   const disconnectWallet = () => {
     setWeb3(null);
     setAccount(null);
@@ -129,7 +151,6 @@ function App() {
     setIsTransferring(false);
   };
 
-  // Change wallet
   const changeWallet = async () => {
     if (!window.ethereum) return;
     try {
@@ -146,7 +167,6 @@ function App() {
     }
   };
 
-  // Return to the initial menu
   const handleGoBack = () => {
     setSelectedOption(null);
     setWeb3(null);
@@ -158,7 +178,6 @@ function App() {
     setIsTransferring(false);
   };
 
-  // Fetch NFTs using past events
   const fetchNFTs = async (
     providedWeb3 = web3,
     providedAccount = account,
@@ -172,7 +191,6 @@ function App() {
         fromBlock: 0,
         toBlock: "latest",
       });
-      console.log("Transfer events fetched:", transferEvents.length);
       const userTokens = new Set();
       transferEvents.forEach((event) => {
         const { from, to, tokenId } = event.returnValues;
@@ -183,20 +201,15 @@ function App() {
           userTokens.delete(tokenId);
         }
       });
-      console.log("User tokens after processing events:", Array.from(userTokens));
 
       const ownedNFTs = [];
       for (let tokenId of userTokens) {
-        console.log("Processing tokenId:", tokenId);
         try {
           const owner = await contract.methods.ownerOf(tokenId).call();
-          console.log(`Owner of token ${tokenId}:`, owner);
           if (owner.toLowerCase() === providedAccount.toLowerCase()) {
             let uri = "";
             try {
               uri = await contract.methods.tokenURI(tokenId).call();
-              console.log(`Token URI for token ${tokenId}:`, uri);
-              // Convert ipfs:// URIs to use Pinata's gateway
               if (uri.startsWith("ipfs://")) {
                 uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
               }
@@ -208,11 +221,9 @@ function App() {
               const response = await fetch(uri);
               const metadata = await response.json();
               image = metadata.image || "";
-              // Convert image URI if it starts with "ipfs://"
               if (image.startsWith("ipfs://")) {
                 image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
               }
-              console.log(`Image for token ${tokenId}:`, image);
             } catch (err) {
               console.warn(`Could not fetch metadata for ${tokenId}`, err);
             }
@@ -222,7 +233,6 @@ function App() {
           console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
         }
       }
-      console.log("Final owned NFTs:", ownedNFTs);
       setNfts(ownedNFTs);
     } catch (error) {
       console.error("Error fetching NFTs:", error);
@@ -231,8 +241,6 @@ function App() {
     }
   };
 
-  // Helper function to send an email after successful transfers.
-  // NOTE: This implementation assumes you have a backend API endpoint to send emails.
   const sendEmail = async () => {
     const typeLabel =
       selectedOption === "rarity"
@@ -242,112 +250,78 @@ function App() {
         : "SILVERBACK";
     const subject = `An Incubated ${typeLabel} Ape has been made`;
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
-
     try {
       const response = await fetch("https://elevatecellbackend.vercel.app/api/send-email.js", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          to: "admin@cayc.io",
-          subject,
-          body,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
       });
       if (!response.ok) {
         console.error("Failed to send email:", response.statusText);
-      } else {
-        console.log("Email sent successfully.");
       }
     } catch (error) {
       console.error("Error sending email:", error);
     }
   };
 
- // Final incubation process with improved error handling and retry logic
-const handleFinalIncubation = async () => {
-  setShowStepsOverlay(false);
-  if (!web3 || !account || !chosenIncubation?.contractAddress) return;
-  setIsTransferring(true);
-  setTransferStatusMessage(null);
+  const handleFinalIncubation = async () => {
+    setShowStepsOverlay(false);
+    if (!web3 || !account || !chosenIncubation?.contractAddress) return;
+    setIsTransferring(true);
+    setTransferStatusMessage(null);
 
-  const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
-  const succeeded = [];
-  const failed = [];
-  const maxRetries = 3; // Maximum number of attempts per transfer
-  const delayBetweenRetries = 5000; // Delay between attempts in milliseconds
-
-  // Helper function to wait for a specified delay
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  // Helper function to retry a transaction
-  const retryTransaction = async (fn, tokenId) => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`Attempt ${attempt} for tokenId ${tokenId}...`);
-        // Attempt the transaction
-        return await fn();
-      } catch (error) {
-        // Check if the error message indicates a pending transaction
-        if (error.message && error.message.includes("already pending")) {
-          console.warn(
-            `Transaction for tokenId ${tokenId} is already pending; skipping further attempts.`
-          );
-          // Optionally, you can choose to treat a pending transaction as a success:
-          return;
+    const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
+    const succeeded = [];
+    const failed = [];
+    const maxRetries = 3;
+    const delayBetweenRetries = 5000;
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const retryTransaction = async (fn, tokenId) => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          return await fn();
+        } catch (error) {
+          if (error.message && error.message.includes("already pending")) {
+            return;
+          }
+          if (attempt === maxRetries) {
+            throw error;
+          }
+          await wait(delayBetweenRetries);
         }
-
-        console.error(`Transfer attempt ${attempt} for tokenId ${tokenId} failed:`, error);
-
-        // If this was the final attempt, rethrow the error
-        if (attempt === maxRetries) {
-          throw error;
-        }
-        // Wait before retrying
-        await wait(delayBetweenRetries);
       }
+    };
+
+    for (let tokenId of selectedNfts) {
+      try {
+        await retryTransaction(
+          () =>
+            contract.methods
+              .transferFrom(account, STAGING_WALLET, tokenId)
+              .send({ from: account }),
+          tokenId
+        );
+        succeeded.push(tokenId);
+      } catch (error) {
+        failed.push(tokenId);
+      }
+    }
+
+    setIsTransferring(false);
+    if (failed.length === 0) {
+      setTransferStatusMessage("All selected NFTs transferred successfully!");
+      sendEmail();
+    } else if (succeeded.length === 0) {
+      setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
+    } else {
+      setTransferStatusMessage(
+        `Partial success - Contact Support:\nSucceeded: ${succeeded.join(
+          ", "
+        )}\nFailed: ${failed.join(", ")}`
+      );
     }
   };
 
-  // Loop through each selected NFT and attempt to transfer it
-  for (let tokenId of selectedNfts) {
-    try {
-      await retryTransaction(
-        () =>
-          contract.methods
-            .transferFrom(account, STAGING_WALLET, tokenId)
-            .send({ from: account }),
-        tokenId
-      );
-      succeeded.push(tokenId);
-    } catch (error) {
-      console.error(
-        `Transfer for tokenId ${tokenId} failed after ${maxRetries} attempts:`,
-        error
-      );
-      failed.push(tokenId);
-    }
-  }
-
-  setIsTransferring(false);
-
-  if (failed.length === 0) {
-    setTransferStatusMessage("All selected NFTs transferred successfully!");
-    // Send the email notification after all transfers succeed
-    sendEmail();
-  } else if (succeeded.length === 0) {
-    setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
-  } else {
-    setTransferStatusMessage(
-      `Partial success - Contact Support:\nSucceeded: ${succeeded.join(
-        ", "
-      )}\nFailed: ${failed.join(", ")}`
-    );
-  }
-};
-
-  // Fetch NFTs when option and wallet are set
   useEffect(() => {
     if (
       selectedOption &&
@@ -360,15 +334,14 @@ const handleFinalIncubation = async () => {
     }
   }, [selectedOption, web3, account]);
 
-  // Continuously animate the three small boxes and medium box.
   useEffect(() => {
     if (selectedOption && selectedOption !== "silverback") {
       const tl = gsap.timeline({ repeat: -1 });
       tl.set(".smallBox", { opacity: 0 });
-      tl.to({}, { duration: 2 });
+      tl.to({}, { duration: 1 });
       tl.set(".smallBox", { opacity: 1 });
       tl.to(".smallBox", {
-        x: 350,
+        x: 200,
         duration: 1,
         stagger: 0.2,
         ease: "power1.inOut"
@@ -397,7 +370,6 @@ const handleFinalIncubation = async () => {
     }
   }, [selectedOption]);
 
-  // Handle NFT selection (limit to 3)
   const handleSelectNFT = (tokenId) => {
     if (selectedNfts.includes(tokenId)) {
       setSelectedNfts(selectedNfts.filter((id) => id !== tokenId));
@@ -410,7 +382,6 @@ const handleFinalIncubation = async () => {
     }
   };
 
-  // Show the steps overlay when exactly 3 NFTs are selected
   const handleIncubateClick = () => {
     if (selectedNfts.length !== 3) {
       alert("You must select exactly 3 NFTs before incubating.");
@@ -419,7 +390,6 @@ const handleFinalIncubation = async () => {
     setShowStepsOverlay(true);
   };
 
-  // Build content based on the current screen
   let content;
   if (!selectedOption) {
     content = (
@@ -440,10 +410,34 @@ const handleFinalIncubation = async () => {
     );
   } else if (selectedOption === "silverback") {
     content = (
-      <div>
-        <h2 style={{ color: "white" }}>
-          SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.
-        </h2>
+      <div style={{ marginTop: "20px" }}>
+        <h1 style={{ color: "white", textAlign: "center" }}>
+          {incubationOptions.silverback.heading}
+        </h1>
+        <div className="boxAnimationContainer">
+          <div className="smallBoxesContainer">
+            {smallBoxImages.silverback.map((src, index) => (
+              <div className="smallBox" key={index}>
+                <img
+                  src={src}
+                  alt={`Small box ${index + 1}`}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              </div>
+            ))}
+          </div>
+          {/* Updated triangle incubator image */}
+          <img className="triangle" src="/incubatortp.png" alt="Incubator" />
+          {/* Replace the medium box text with an image */}
+          <div className="mediumBox" ref={mediumBoxRef}>
+            <img
+              src={mediumBoxImages.silverback}
+              alt="Medium Box - Silverback"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </div>
+        </div>
+        <p style={{ color: "white" }}>SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.</p>
         <button className="myButton" onClick={handleGoBack}>
           Back to Incubation Menu
         </button>
@@ -456,13 +450,28 @@ const handleFinalIncubation = async () => {
           {chosenIncubation.heading}
         </h1>
         <div className="boxAnimationContainer">
-          <div className="smallBox" id="box1">{smallBoxText}</div>
-          <div className="smallBox" id="box2">{smallBoxText}</div>
-          <div className="smallBox" id="box3">{smallBoxText}</div>
-          <div className="triangle">INCUBATOR</div>
-          <div className="mediumBox" ref={mediumBoxRef}>{mediumBoxText}</div>
+          <div className="smallBoxesContainer">
+            {smallBoxImages[selectedOption].map((src, index) => (
+              <div className="smallBox" key={index}>
+                <img
+                  src={src}
+                  alt={`Small box ${index + 1}`}
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              </div>
+            ))}
+          </div>
+          {/* Updated triangle incubator image */}
+          <img className="triangle" src="/incubatortp.png" alt="Incubator" />
+          {/* Replace the medium box text with an image based on the selected option */}
+          <div className="mediumBox" ref={mediumBoxRef}>
+            <img
+              src={mediumBoxImages[selectedOption]}
+              alt={`Medium Box - ${selectedOption}`}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </div>
         </div>
-
         <button className="myButton" onClick={handleGoBack}>
           Back to Incubation Menu
         </button>
@@ -472,7 +481,9 @@ const handleFinalIncubation = async () => {
           </button>
         ) : (
           <div style={{ color: "white" }}>
-            <p><strong>Connected Wallet:</strong> {account}</p>
+            <p>
+              <strong>Connected Wallet:</strong> {account}
+            </p>
             <button className="myButton" onClick={disconnectWallet}>
               Disconnect Wallet
             </button>
@@ -490,7 +501,13 @@ const handleFinalIncubation = async () => {
           </p>
         )}
         {!isLoading && nfts.length > 0 ? (
-          <table style={{ margin: "20px auto", borderCollapse: "collapse", color: "white" }}>
+          <table
+            style={{
+              margin: "20px auto",
+              borderCollapse: "collapse",
+              color: "white",
+            }}
+          >
             <thead>
               <tr>
                 <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
@@ -502,7 +519,13 @@ const handleFinalIncubation = async () => {
             <tbody>
               {nfts.map((nft) => (
                 <tr key={nft.tokenId}>
-                  <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
+                  <td
+                    style={{
+                      border: "1px solid #ccc",
+                      padding: "8px",
+                      textAlign: "center",
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={selectedNfts.includes(nft.tokenId)}
@@ -591,10 +614,15 @@ const handleFinalIncubation = async () => {
                 Click OK if you wish to continue or CANCEL to stop now.
               </p>
               <div style={{ marginTop: "10px" }}>
-                <button onClick={handleFinalIncubation} style={{ marginRight: "10px", padding: "8px 16px" }}>
+                <button
+                  onClick={handleFinalIncubation}
+                  style={{ marginRight: "10px", padding: "8px 16px" }}
+                >
                   OK
                 </button>
-                <button onClick={() => setShowStepsOverlay(false)}>CANCEL</button>
+                <button onClick={() => setShowStepsOverlay(false)}>
+                  CANCEL
+                </button>
               </div>
             </div>
           </div>
@@ -616,10 +644,19 @@ const handleFinalIncubation = async () => {
           <div className="confirmation-overlay">
             <div className="confirmation-box">
               <h3>Transfer Status</h3>
-              <pre style={{ backgroundColor: "#f5f5f5", padding: "10px", whiteSpace: "pre-wrap" }}>
+              <pre
+                style={{
+                  backgroundColor: "#f5f5f5",
+                  padding: "10px",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
                 {transferStatusMessage}
               </pre>
-              <button style={{ marginTop: "10px", padding: "8px 16px" }} onClick={() => setTransferStatusMessage(null)}>
+              <button
+                style={{ marginTop: "10px", padding: "8px 16px" }}
+                onClick={() => setTransferStatusMessage(null)}
+              >
                 Close
               </button>
             </div>
