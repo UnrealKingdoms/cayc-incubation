@@ -231,7 +231,40 @@ function App() {
     }
   };
   
-  
+  // Helper function to send an email after successful transfers.
+  // NOTE: This implementation assumes you have a backend API endpoint to send emails.
+  const sendEmail = async () => {
+    // Determine the type label for the email subject.
+    const typeLabel =
+      selectedOption === "rarity"
+        ? "RARITY"
+        : selectedOption === "gorilla"
+        ? "GORILLA"
+        : "SILVERBACK";
+    const subject = `An Incubated ${typeLabel} Ape has been made`;
+    const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
+    
+    try {
+      const response = await fetch("/api/send-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: "admin@cayc.io",
+          subject,
+          body,
+        }),
+      });
+      if (!response.ok) {
+        console.error("Failed to send email:", response.statusText);
+      } else {
+        console.log("Email sent successfully.");
+      }
+    } catch (error) {
+      console.error("Error sending email:", error);
+    }
+  };
 
   // Final incubation process
   const handleFinalIncubation = async () => {
@@ -256,6 +289,8 @@ function App() {
     setIsTransferring(false);
     if (failed.length === 0) {
       setTransferStatusMessage("All selected NFTs transferred successfully!");
+      // Send the email notification after all transfers succeed
+      sendEmail();
     } else if (succeeded.length === 0) {
       setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
     } else {
@@ -426,48 +461,46 @@ function App() {
           </p>
         )}
         {!isLoading && nfts.length > 0 ? (
- <table style={{ margin: "20px auto", borderCollapse: "collapse", color: "white" }}>
- <thead>
-   <tr>
-     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
-     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
-     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
-     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
-   </tr>
- </thead>
- <tbody>
-  {nfts.map((nft) => (
-    <tr key={nft.tokenId}>
-      <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
-        <input
-          type="checkbox"
-          checked={selectedNfts.includes(nft.tokenId)}
-          onChange={() => handleSelectNFT(nft.tokenId)}
-        />
-      </td>
-      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-        {String(nft.tokenId)}
-      </td>
-      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-        {nft.tokenURI || "No URI"}
-      </td>
-      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-  {nft.image ? (
-    <NFTImage
-      src={nft.image}
-      alt={`Token ${nft.tokenId}`}
-      style={{ width: "100px", height: "auto" }}
-    />
-  ) : (
-    "No Image"
-  )}
-</td>
-    </tr>
-  ))}
-</tbody>
-
-</table>
-
+          <table style={{ margin: "20px auto", borderCollapse: "collapse", color: "white" }}>
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nfts.map((nft) => (
+                <tr key={nft.tokenId}>
+                  <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedNfts.includes(nft.tokenId)}
+                      onChange={() => handleSelectNFT(nft.tokenId)}
+                    />
+                  </td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    {String(nft.tokenId)}
+                  </td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    {nft.tokenURI || "No URI"}
+                  </td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    {nft.image ? (
+                      <NFTImage
+                        src={nft.image}
+                        alt={`Token ${nft.tokenId}`}
+                        style={{ width: "100px", height: "auto" }}
+                      />
+                    ) : (
+                      "No Image"
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         ) : !isLoading && account ? (
           <p style={{ marginTop: "20px", color: "white" }}>
             No NFTs found for this wallet.
@@ -520,7 +553,7 @@ function App() {
               <h2>STEPS TO INCUBATE</h2>
               <p>
                 1) Your selected 3 NFTs will be moved to a staging wallet<br />
-                2) An Incubated NFT will be generated in your wallet<br />
+                2) An Incubated NFT will be generated within 24hrs and sent to your wallet<br />
                 3) The staging wallet holding the 3 NFTs will be burnt
               </p>
               <p style={{ fontWeight: "bold" }}>
