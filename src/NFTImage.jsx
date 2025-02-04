@@ -14,8 +14,8 @@ const NFTImage = ({ src, alt, style, retryInterval = 5000 }) => {
 
     // Function to build a proxy URL using your deployed proxy on Vercel.
     const buildProxyUrl = (url) => {
-        // Use your deployed proxy URL here.
-        const proxyBase = "https://cayc-incubator-ipfsproxy.vercel.app/server.js";
+        // Updated proxy endpoint (adjust the path if needed)
+        const proxyBase = "https://cayc-incubator-ipfsproxy.vercel.app/api/proxy";
         return `${proxyBase}?url=${encodeURIComponent(url)}`;
     };
 
@@ -23,7 +23,9 @@ const NFTImage = ({ src, alt, style, retryInterval = 5000 }) => {
         // Choose the gateway based on the current attempt:
         // Attempt 0: Pinata; Attempt 1 (or higher): Cloudflare.
         const gateway =
-            attempt === 0 ? "https://gateway.pinata.cloud/ipfs/" : "https://cloudflare-ipfs.com/ipfs/";
+            attempt === 0
+                ? "https://gateway.pinata.cloud/ipfs/"
+                : "https://cloudflare-ipfs.com/ipfs/";
         const originalUrl = convertIPFS(src, gateway);
         const proxiedUrl = buildProxyUrl(originalUrl);
 
