@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Web3 from "web3";
-import "./App.css"; // Import our CSS file
+import gsap from "gsap";
+import "./App.css";
 
 // Minimal ABI for log-based ERC-721 usage
 const nftABI = [
@@ -79,11 +80,27 @@ function App() {
   const [showStepsOverlay, setShowStepsOverlay] = useState(false);
   const [transferStatusMessage, setTransferStatusMessage] = useState(null);
 
+  // Reference for the medium box (if needed)
+  const mediumBoxRef = useRef(null);
+
   const chosenIncubation = selectedOption
     ? incubationOptions[selectedOption]
     : null;
 
-  // Connect wallet function
+  // Determine the text for the animated boxes based on the chosen option.
+  let smallBoxText = "";
+  let mediumBoxText = "";
+  if (selectedOption === "rarity") {
+    // For "INCUBATE A RARITY": small boxes show "BASE" and medium box shows "RARITY"
+    smallBoxText = "BASE";
+    mediumBoxText = "RARITY";
+  } else if (selectedOption === "gorilla") {
+    // For "INCUBATE A GORILLA": small boxes show "RARITY" and medium box shows "GORILLA"
+    smallBoxText = "RARITY";
+    mediumBoxText = "GORILLA";
+  }
+
+  // Connect wallet
   const connectWallet = async () => {
     if (!window.ethereum) {
       alert("Please install MetaMask or another Web3 wallet provider.");
@@ -128,7 +145,7 @@ function App() {
     }
   };
 
-  // Go back to the initial menu
+  // Return to the initial menu
   const handleGoBack = () => {
     setSelectedOption(null);
     setWeb3(null);
@@ -223,10 +240,53 @@ function App() {
 
   // Fetch NFTs when option and wallet are set
   useEffect(() => {
-    if (selectedOption && selectedOption !== "silverback" && web3 && account && chosenIncubation?.contractAddress) {
+    if (
+      selectedOption &&
+      selectedOption !== "silverback" &&
+      web3 &&
+      account &&
+      chosenIncubation?.contractAddress
+    ) {
       fetchNFTs(web3, account, chosenIncubation.contractAddress);
     }
   }, [selectedOption, web3, account]);
+
+  // Continuously animate the three small boxes marching toward the triangle,
+  // then animate the medium box emerging from the triangle and moving to the right.
+  useEffect(() => {
+    if (selectedOption && selectedOption !== "silverback") {
+      const tl = gsap.timeline({ repeat: -1, repeatDelay: 0.3 });
+      // Animate small boxes: from their starting position to the left edge of the triangle.
+      // The triangle’s left edge is at ~390px (container width 490px minus triangle width 120px plus the offset).
+      // Since the small boxes start at left: 180px, the displacement is 210px.
+      tl.to(".smallBox", {
+        x: 250,
+        duration: 1,
+        stagger: 0.2,
+        ease: "power1.inOut"
+      })
+      // Fade out the small boxes and reset.
+      .to(".smallBox", {
+        opacity: 0,
+        duration: 0.5,
+        ease: "power1.inOut"
+      }, "+=0.1")
+      .set(".smallBox", { x: 0, opacity: 1 })
+      // Animate the medium box emerging from the triangle.
+      .to(".mediumBox", {
+        opacity: 1,
+        x: 150, // moves 150px to the right
+        duration: 1,
+        ease: "power1.inOut"
+      })
+      .to(".mediumBox", {
+        opacity: 0,
+        duration: 0.5,
+        ease: "power1.inOut"
+      })
+      .set(".mediumBox", { x: 0, opacity: 0 });
+    }
+  }, [selectedOption]);
 
   // Handle NFT selection (limit to 3)
   const handleSelectNFT = (tokenId) => {
@@ -253,7 +313,7 @@ function App() {
   // Build content based on the current screen
   let content;
   if (!selectedOption) {
-    // Initial menu with three options in a vertically aligned container
+    // Initial menu with three options
     content = (
       <div className="menuBox">
         <h2 style={{ color: "white", marginTop: 0 }}>
@@ -274,7 +334,7 @@ function App() {
     content = (
       <div>
         <h2 style={{ color: "white" }}>
-          You have selected SILVERBACK INCUBATION. NOT YET ACTIVE.
+          SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.
         </h2>
         <button className="myButton" onClick={handleGoBack}>
           Back to Incubation Menu
@@ -282,11 +342,23 @@ function App() {
       </div>
     );
   } else {
+    // For rarity/gorilla screens
     content = (
       <div style={{ marginTop: "20px" }}>
         <h1 style={{ color: "white", textAlign: "center" }}>
           {chosenIncubation.heading}
         </h1>
+        {/* Animated boxes appear under the heading */}
+        <div className="boxAnimationContainer">
+          <div className="smallBox" id="box1">{smallBoxText}</div>
+          <div className="smallBox" id="box2">{smallBoxText}</div>
+          <div className="smallBox" id="box3">{smallBoxText}</div>
+          {/* The triangle is always visible with the word INCUBATOR */}
+          <div className="triangle">INCUBATOR</div>
+          {/* The medium box will emerge and display either RARITY or GORILLA */}
+          <div className="mediumBox" ref={mediumBoxRef}>{mediumBoxText}</div>
+        </div>
+
         <button className="myButton" onClick={handleGoBack}>
           Back to Incubation Menu
         </button>
@@ -300,7 +372,9 @@ function App() {
             <button className="myButton" onClick={disconnectWallet}>
               Disconnect Wallet
             </button>
-           
+            <button className="myButton" onClick={changeWallet}>
+              Change Wallet
+            </button>
             <button className="myButton" onClick={() => fetchNFTs()}>
               Refresh NFTs
             </button>
@@ -336,7 +410,9 @@ function App() {
                       onChange={() => handleSelectNFT(nft.tokenId)}
                     />
                   </td>
-                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>{nft.tokenId}</td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    {nft.tokenId}
+                  </td>
                   <td style={{ border: "1px solid #ccc", padding: "8px" }}>
                     {nft.tokenURI || "No URI"}
                   </td>

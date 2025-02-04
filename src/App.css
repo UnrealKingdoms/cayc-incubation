@@ -19,16 +19,79 @@
   background-color: rgba(255, 255, 255, 0.2);
 }
 
-/* Container for the initial menu of buttons, 30% larger than button width */
+/* Container for the initial menu of buttons (30% larger than 300px) */
 .menuBox {
   background-color: #003366;
   margin: 0 auto;
   width: 390px;               /* 300px + 30% of 300px = 390px */
   border-radius: 20px;
   padding: 30px;
-  display: flex;              /* Flex container */
-  flex-direction: column;     /* Stack children vertically */
-  align-items: center;        /* Center children horizontally */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Container for the box animation.
+   Fixed width (490px) so positions are predictable. */
+.boxAnimationContainer {
+  position: relative;
+  width: 490px;
+  height: 140px;         /* Enough height for the animation */
+  margin-bottom: 20px;
+}
+
+/* Small boxes: start at a left offset of 180px */
+.smallBox {
+  width: 60px;
+  height: 40px;
+  background-color: white;
+  position: absolute;
+  left: 115px;
+  opacity: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: black;
+}
+
+#box1 { top: 10px; }
+#box2 { top: 45px; }
+#box3 { top: 80px; }
+
+/* The large triangle – always visible on the right.
+   Increased in size to 180px by 180px and using clip-path to create a triangle. */
+.triangle {
+  width: 190px;
+  height: 130px;
+  background: white;
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  position: absolute;
+  right: 0px;  /* Adjust as needed */
+  top: 0px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: black;
+}
+
+/* The medium box that emerges from the triangle.
+   Initially hidden (opacity: 0) and positioned just to the right of the triangle.
+   (Adjust right value as needed.) */
+.mediumBox {
+  width: 100px;
+  height: 80px;
+  background-color: white;
+  position: absolute;
+  right: -50px;  /* Start further to the right */
+  top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: black;
+  opacity: 0;
 }
 
 /* Optional overlay styles */
