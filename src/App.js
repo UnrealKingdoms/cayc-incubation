@@ -184,7 +184,7 @@ function App() {
         }
       });
       console.log("User tokens after processing events:", Array.from(userTokens));
-  
+
       const ownedNFTs = [];
       for (let tokenId of userTokens) {
         console.log("Processing tokenId:", tokenId);
@@ -230,11 +230,10 @@ function App() {
       setIsLoading(false);
     }
   };
-  
+
   // Helper function to send an email after successful transfers.
   // NOTE: This implementation assumes you have a backend API endpoint to send emails.
   const sendEmail = async () => {
-    // Determine the type label for the email subject.
     const typeLabel =
       selectedOption === "rarity"
         ? "RARITY"
@@ -243,7 +242,7 @@ function App() {
         : "SILVERBACK";
     const subject = `An Incubated ${typeLabel} Ape has been made`;
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
-    
+
     try {
       const response = await fetch("https://elevatecellbackend.vercel.app/api/send-email.js", {
         method: "POST",
@@ -266,26 +265,57 @@ function App() {
     }
   };
 
-  // Final incubation process
+  // Final incubation process with improved error handling and retry logic
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
     if (!web3 || !account || !chosenIncubation?.contractAddress) return;
     setIsTransferring(true);
     setTransferStatusMessage(null);
+
     const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
     const succeeded = [];
     const failed = [];
+    const maxRetries = 3; // Maximum number of attempts per transfer
+    const delayBetweenRetries = 5000; // Delay between attempts in milliseconds
+
+    // Helper function to wait for a specified delay
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Helper function to retry a transaction
+    const retryTransaction = async (fn, tokenId) => {
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`Attempt ${attempt} for tokenId ${tokenId}...`);
+          // Attempt the transaction
+          return await fn();
+        } catch (error) {
+          console.error(`Transfer attempt ${attempt} for tokenId ${tokenId} failed:`, error);
+          if (attempt === maxRetries) {
+            throw error;
+          }
+          // Wait before retrying
+          await wait(delayBetweenRetries);
+        }
+      }
+    };
+
+    // Loop through each selected NFT and attempt to transfer it
     for (let tokenId of selectedNfts) {
       try {
-        await contract.methods
-          .transferFrom(account, STAGING_WALLET, tokenId)
-          .send({ from: account });
+        await retryTransaction(
+          () =>
+            contract.methods
+              .transferFrom(account, STAGING_WALLET, tokenId)
+              .send({ from: account }),
+          tokenId
+        );
         succeeded.push(tokenId);
       } catch (error) {
-        console.error(`Transfer for tokenId ${tokenId} failed:`, error);
+        console.error(`Transfer for tokenId ${tokenId} failed after ${maxRetries} attempts:`, error);
         failed.push(tokenId);
       }
     }
+
     setIsTransferring(false);
     if (failed.length === 0) {
       setTransferStatusMessage("All selected NFTs transferred successfully!");
@@ -295,7 +325,7 @@ function App() {
       setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
     } else {
       setTransferStatusMessage(
-        `Partial success:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(", ")}`
+        `Partial success - Contact Support:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(", ")}`
       );
     }
   };
@@ -313,53 +343,40 @@ function App() {
     }
   }, [selectedOption, web3, account]);
 
-  // Continuously animate the three small boxes marching toward the triangle,
-  // then animate the medium box emerging from the triangle and moving to the right.
+  // Continuously animate the three small boxes and medium box.
   useEffect(() => {
     if (selectedOption && selectedOption !== "silverback") {
       const tl = gsap.timeline({ repeat: -1 });
-      
-      // Immediately hide the small boxes at the start of the timeline.
       tl.set(".smallBox", { opacity: 0 });
-      
-      // Wait for 2 seconds before doing anything else.
       tl.to({}, { duration: 2 });
-      
-      // Now set the small boxes visible before animating.
       tl.set(".smallBox", { opacity: 1 });
-      
-      // Animate small boxes: from their starting position to the left edge of the triangle.
       tl.to(".smallBox", {
         x: 350,
         duration: 1,
         stagger: 0.2,
         ease: "power1.inOut"
       })
-      // Fade out the small boxes.
-      .to(".smallBox", {
-        opacity: 0,
-        duration: 0.5,
-        ease: "power1.inOut"
-      }, "+=0.1")
-      // Reset small boxes.
-      .set(".smallBox", { x: 0, opacity: 0 })
-      // Animate the medium box emerging from the triangle.
-      .to(".mediumBox", {
-        opacity: 1,
-        duration: 0.1
-      })
-      .to(".mediumBox", {
-        x: 350,
-        duration: 0.8,
-        ease: "power1.inOut"
-      })
-      .to(".mediumBox", {
-        opacity: 0,
-        duration: 0.1,
-        ease: "power1.inOut"
-      })
-      // Reset the medium box.
-      .set(".mediumBox", { x: 0, opacity: 0 });
+        .to(".smallBox", {
+          opacity: 0,
+          duration: 0.5,
+          ease: "power1.inOut"
+        }, "+=0.1")
+        .set(".smallBox", { x: 0, opacity: 0 })
+        .to(".mediumBox", {
+          opacity: 1,
+          duration: 0.1
+        })
+        .to(".mediumBox", {
+          x: 350,
+          duration: 0.8,
+          ease: "power1.inOut"
+        })
+        .to(".mediumBox", {
+          opacity: 0,
+          duration: 0.1,
+          ease: "power1.inOut"
+        })
+        .set(".mediumBox", { x: 0, opacity: 0 });
     }
   }, [selectedOption]);
 
@@ -388,7 +405,6 @@ function App() {
   // Build content based on the current screen
   let content;
   if (!selectedOption) {
-    // Initial menu with three options
     content = (
       <div className="menuBox">
         <h2 style={{ color: "white", marginTop: 0 }}>
@@ -417,20 +433,16 @@ function App() {
       </div>
     );
   } else {
-    // For rarity/gorilla screens
     content = (
       <div style={{ marginTop: "20px" }}>
         <h1 style={{ color: "white", textAlign: "center" }}>
           {chosenIncubation.heading}
         </h1>
-        {/* Animated boxes appear under the heading */}
         <div className="boxAnimationContainer">
           <div className="smallBox" id="box1">{smallBoxText}</div>
           <div className="smallBox" id="box2">{smallBoxText}</div>
           <div className="smallBox" id="box3">{smallBoxText}</div>
-          {/* The triangle is always visible with the word INCUBATOR */}
           <div className="triangle">INCUBATOR</div>
-          {/* The medium box will emerge and display either RARITY or GORILLA */}
           <div className="mediumBox" ref={mediumBoxRef}>{mediumBoxText}</div>
         </div>
 
