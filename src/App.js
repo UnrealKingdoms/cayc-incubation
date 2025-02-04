@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Web3 from "web3";
 import gsap from "gsap";
 import "./App.css";
+import NFTImage from "./NFTImage";
 
 // Minimal ABI for log-based ERC-721 usage
 const nftABI = [
@@ -61,7 +62,7 @@ const incubationOptions = {
     buttonLabel: "INCUBATE A GORILLA",
   },
   silverback: {
-    heading: "SILVERBACK Incubation (Does Nothing)",
+    heading: "SILVERBACK INCUBATION (Not Active)",
     buttonLabel: "",
   },
 };
@@ -171,8 +172,9 @@ function App() {
         fromBlock: 0,
         toBlock: "latest",
       });
+      console.log("Transfer events fetched:", transferEvents.length);
       const userTokens = new Set();
-      for (let event of transferEvents) {
+      transferEvents.forEach((event) => {
         const { from, to, tokenId } = event.returnValues;
         if (to.toLowerCase() === providedAccount.toLowerCase()) {
           userTokens.add(tokenId);
@@ -180,24 +182,47 @@ function App() {
         if (from.toLowerCase() === providedAccount.toLowerCase()) {
           userTokens.delete(tokenId);
         }
-      }
+      });
+      console.log("User tokens after processing events:", Array.from(userTokens));
+  
       const ownedNFTs = [];
       for (let tokenId of userTokens) {
+        console.log("Processing tokenId:", tokenId);
         try {
           const owner = await contract.methods.ownerOf(tokenId).call();
+          console.log(`Owner of token ${tokenId}:`, owner);
           if (owner.toLowerCase() === providedAccount.toLowerCase()) {
             let uri = "";
             try {
               uri = await contract.methods.tokenURI(tokenId).call();
+              console.log(`Token URI for token ${tokenId}:`, uri);
+              // Convert ipfs:// URIs to use Pinata's gateway
+              if (uri.startsWith("ipfs://")) {
+                uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+              }
             } catch (err) {
               console.warn(`Could not get tokenURI for ${tokenId}`, err);
             }
-            ownedNFTs.push({ tokenId, tokenURI: uri });
+            let image = "";
+            try {
+              const response = await fetch(uri);
+              const metadata = await response.json();
+              image = metadata.image || "";
+              // Convert image URI if it starts with "ipfs://"
+              if (image.startsWith("ipfs://")) {
+                image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+              }
+              console.log(`Image for token ${tokenId}:`, image);
+            } catch (err) {
+              console.warn(`Could not fetch metadata for ${tokenId}`, err);
+            }
+            ownedNFTs.push({ tokenId, tokenURI: uri, image });
           }
         } catch (err) {
           console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
         }
       }
+      console.log("Final owned NFTs:", ownedNFTs);
       setNfts(ownedNFTs);
     } catch (error) {
       console.error("Error fetching NFTs:", error);
@@ -205,6 +230,8 @@ function App() {
       setIsLoading(false);
     }
   };
+  
+  
 
   // Final incubation process
   const handleFinalIncubation = async () => {
@@ -261,14 +288,14 @@ function App() {
       tl.set(".smallBox", { opacity: 0 });
       
       // Wait for 2 seconds before doing anything else.
-      tl.to({}, { duration: 1 });
+      tl.to({}, { duration: 2 });
       
       // Now set the small boxes visible before animating.
       tl.set(".smallBox", { opacity: 1 });
       
       // Animate small boxes: from their starting position to the left edge of the triangle.
       tl.to(".smallBox", {
-        x: 250,
+        x: 350,
         duration: 1,
         stagger: 0.2,
         ease: "power1.inOut"
@@ -287,7 +314,7 @@ function App() {
         duration: 0.1
       })
       .to(".mediumBox", {
-        x: 250,
+        x: 350,
         duration: 0.8,
         ease: "power1.inOut"
       })
@@ -300,7 +327,6 @@ function App() {
       .set(".mediumBox", { x: 0, opacity: 0 });
     }
   }, [selectedOption]);
-  
 
   // Handle NFT selection (limit to 3)
   const handleSelectNFT = (tokenId) => {
@@ -400,40 +426,47 @@ function App() {
           </p>
         )}
         {!isLoading && nfts.length > 0 ? (
-          <table
-            style={{
-              margin: "20px auto",
-              borderCollapse: "collapse",
-              color: "white",
-            }}
-          >
-            <thead>
-              <tr>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {nfts.map((nft) => (
-                <tr key={nft.tokenId}>
-                  <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedNfts.includes(nft.tokenId)}
-                      onChange={() => handleSelectNFT(nft.tokenId)}
-                    />
-                  </td>
-                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                    {nft.tokenId}
-                  </td>
-                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                    {nft.tokenURI || "No URI"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+ <table style={{ margin: "20px auto", borderCollapse: "collapse", color: "white" }}>
+ <thead>
+   <tr>
+     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
+     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
+     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
+     <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
+   </tr>
+ </thead>
+ <tbody>
+  {nfts.map((nft) => (
+    <tr key={nft.tokenId}>
+      <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
+        <input
+          type="checkbox"
+          checked={selectedNfts.includes(nft.tokenId)}
+          onChange={() => handleSelectNFT(nft.tokenId)}
+        />
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {String(nft.tokenId)}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+        {nft.tokenURI || "No URI"}
+      </td>
+      <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+  {nft.image ? (
+    <NFTImage
+      src={nft.image}
+      alt={`Token ${nft.tokenId}`}
+      style={{ width: "100px", height: "auto" }}
+    />
+  ) : (
+    "No Image"
+  )}
+</td>
+    </tr>
+  ))}
+</tbody>
+</table>
+
         ) : !isLoading && account ? (
           <p style={{ marginTop: "20px", color: "white" }}>
             No NFTs found for this wallet.
@@ -472,7 +505,7 @@ function App() {
           backgroundColor: "#003366",
           margin: "0 auto",
           minWidth: "390px",
-          maxWidth: "800px",
+          maxWidth: "1000px",
           borderRadius: "20px",
           padding: "30px",
           textAlign: "center",

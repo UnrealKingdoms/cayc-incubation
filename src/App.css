@@ -35,7 +35,7 @@
    Fixed width (490px) so positions are predictable. */
 .boxAnimationContainer {
   position: relative;
-  width: 490px;
+  width: 590px;
   height: 140px;         /* Enough height for the animation */
   margin-bottom: 20px;
 }
@@ -85,7 +85,7 @@
     background-color: white;
     position: absolute;
     right: -100px;  /* moved further left than before */
-    left: +340px; 
+    left: +450px; 
     top: 20px;
     display: flex;
     align-items: center;
