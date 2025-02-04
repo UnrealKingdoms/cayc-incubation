@@ -12,17 +12,26 @@ const NFTImage = ({ src, alt, style, retryInterval = 5000 }) => {
         return uri;
     };
 
+    // Function to build a proxy URL using your deployed proxy on Vercel.
+    const buildProxyUrl = (url) => {
+        // Use your deployed proxy URL here.
+        const proxyBase = "https://cayc-incubator-ipfsproxy.vercel.app/server.js";
+        return `${proxyBase}?url=${encodeURIComponent(url)}`;
+    };
+
     useEffect(() => {
         // Choose the gateway based on the current attempt:
-        // Attempt 0: Pinata
-        // Attempt 1 (or higher): Cloudflare
-        const gateway = attempt === 0 ? "https://gateway.pinata.cloud/ipfs/" : "https://cloudflare-ipfs.com/ipfs/";
-        const finalSrc = convertIPFS(src, gateway);
-        console.log("Attempt", attempt, "loading image from:", finalSrc);
-        setImageSrc(finalSrc);
+        // Attempt 0: Pinata; Attempt 1 (or higher): Cloudflare.
+        const gateway =
+            attempt === 0 ? "https://gateway.pinata.cloud/ipfs/" : "https://cloudflare-ipfs.com/ipfs/";
+        const originalUrl = convertIPFS(src, gateway);
+        const proxiedUrl = buildProxyUrl(originalUrl);
+
+        console.log("Attempt", attempt, "loading image from proxy:", proxiedUrl);
+        setImageSrc(proxiedUrl);
     }, [src, attempt]);
 
-    // When the image fails to load, try again after a delay
+    // When the image fails to load, try again after a delay.
     const handleError = () => {
         console.warn("Image failed to load:", imageSrc);
         setTimeout(() => {
@@ -48,14 +57,7 @@ const NFTImage = ({ src, alt, style, retryInterval = 5000 }) => {
         );
     }
 
-    return (
-        <img
-            src={imageSrc}
-            alt={alt}
-            style={style}
-            onError={handleError}
-        />
-    );
+    return <img src={imageSrc} alt={alt} style={style} onError={handleError} />;
 };
 
 export default NFTImage;
