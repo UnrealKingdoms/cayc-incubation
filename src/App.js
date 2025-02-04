@@ -1,12 +1,8 @@
 import React, { useEffect, useState } from "react";
 import Web3 from "web3";
-import "./App.css";
+import "./App.css"; // Import our CSS file
 
-// Minimal ABI for log-based ERC-721 usage:
-//  - Transfer event
-//  - ownerOf
-//  - tokenURI
-//  - transferFrom
+// Minimal ABI for log-based ERC-721 usage
 const nftABI = [
   {
     anonymous: false,
@@ -77,22 +73,17 @@ function App() {
   const [account, setAccount] = useState(null);
   const [nfts, setNfts] = useState([]);
   const [selectedNfts, setSelectedNfts] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [selectedOption, setSelectedOption] = useState(null); // "rarity", "gorilla", "silverback"
+  const [showStepsOverlay, setShowStepsOverlay] = useState(false);
+  const [transferStatusMessage, setTransferStatusMessage] = useState(null);
 
-  // Loading states
-  const [isLoading, setIsLoading] = useState(false); // For reading NFTs
-  const [isTransferring, setIsTransferring] = useState(false); // For transferring NFTs
-
-  // Overlay states
-  const [selectedOption, setSelectedOption] = useState(null); // "rarity","gorilla","silverback", or null
-  const [showStepsOverlay, setShowStepsOverlay] = useState(false); // "STEPS TO INCUBATE"
-  const [transferStatusMessage, setTransferStatusMessage] = useState(null); // success/fail/partial
-
-  // If an option is chosen, read config from `incubationOptions`
   const chosenIncubation = selectedOption
     ? incubationOptions[selectedOption]
     : null;
 
-  // Connect wallet (MetaMask, etc.)
+  // Connect wallet function
   const connectWallet = async () => {
     if (!window.ethereum) {
       alert("Please install MetaMask or another Web3 wallet provider.");
@@ -105,11 +96,11 @@ function App() {
       const accounts = await _web3.eth.getAccounts();
       setAccount(accounts[0]);
     } catch (error) {
-      console.error("User denied account access or error occurred:", error);
+      console.error("User denied account access or error:", error);
     }
   };
 
-  // Disconnect: clear local states
+  // Disconnect wallet
   const disconnectWallet = () => {
     setWeb3(null);
     setAccount(null);
@@ -120,7 +111,7 @@ function App() {
     setIsTransferring(false);
   };
 
-  // Change wallet: re-request accounts
+  // Change wallet
   const changeWallet = async () => {
     if (!window.ethereum) return;
     try {
@@ -129,7 +120,6 @@ function App() {
       setWeb3(_web3);
       const accounts = await _web3.eth.getAccounts();
       setAccount(accounts[0]);
-      // Optionally refetch NFTs if user is on a valid option
       if (selectedOption !== "silverback" && chosenIncubation) {
         fetchNFTs(_web3, accounts[0], chosenIncubation.contractAddress);
       }
@@ -138,7 +128,7 @@ function App() {
     }
   };
 
-  // Go back to the initial 3-option menu
+  // Go back to the initial menu
   const handleGoBack = () => {
     setSelectedOption(null);
     setWeb3(null);
@@ -150,7 +140,7 @@ function App() {
     setIsTransferring(false);
   };
 
-  // Log-based approach to fetch NFTs from Transfer events
+  // Fetch NFTs using past events
   const fetchNFTs = async (
     providedWeb3 = web3,
     providedAccount = account,
@@ -160,54 +150,37 @@ function App() {
     try {
       setIsLoading(true);
       const contract = new providedWeb3.eth.Contract(nftABI, contractAddress);
-
-      console.log("Fetching past Transfer events for contract:", contractAddress);
       const transferEvents = await contract.getPastEvents("Transfer", {
         fromBlock: 0,
         toBlock: "latest",
       });
-      console.log("Total Transfer events:", transferEvents.length);
-
-      // Build a set of tokenIds that ended up in the user's wallet
       const userTokens = new Set();
-
       for (let event of transferEvents) {
         const { from, to, tokenId } = event.returnValues;
-        const fromLower = from.toLowerCase();
-        const toLower = to.toLowerCase();
-        const userAddressLower = providedAccount.toLowerCase();
-
-        if (toLower === userAddressLower) {
+        if (to.toLowerCase() === providedAccount.toLowerCase()) {
           userTokens.add(tokenId);
         }
-        if (fromLower === userAddressLower) {
+        if (from.toLowerCase() === providedAccount.toLowerCase()) {
           userTokens.delete(tokenId);
         }
       }
-
-      // Confirm ownership & fetch tokenURI
       const ownedNFTs = [];
       for (let tokenId of userTokens) {
-        let owner;
         try {
-          owner = await contract.methods.ownerOf(tokenId).call();
+          const owner = await contract.methods.ownerOf(tokenId).call();
+          if (owner.toLowerCase() === providedAccount.toLowerCase()) {
+            let uri = "";
+            try {
+              uri = await contract.methods.tokenURI(tokenId).call();
+            } catch (err) {
+              console.warn(`Could not get tokenURI for ${tokenId}`, err);
+            }
+            ownedNFTs.push({ tokenId, tokenURI: uri });
+          }
         } catch (err) {
           console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
-          continue;
-        }
-
-        if (owner.toLowerCase() === providedAccount.toLowerCase()) {
-          let uri = "";
-          try {
-            uri = await contract.methods.tokenURI(tokenId).call();
-          } catch (err) {
-            console.warn(`Could not get tokenURI for ${tokenId}`, err);
-          }
-          ownedNFTs.push({ tokenId, tokenURI: uri });
         }
       }
-
-      console.log("Final user-owned NFTs:", ownedNFTs);
       setNfts(ownedNFTs);
     } catch (error) {
       console.error("Error fetching NFTs:", error);
@@ -216,36 +189,17 @@ function App() {
     }
   };
 
-  /**
-   * After user clicks "OK" in STEPS TO INCUBATE:
-   *  1) Hide the steps overlay
-   *  2) Transfer each selected NFT to STAGING_WALLET
-   *     - If user cancels or a transaction fails, we track partial success
-   *  3) Show success or partial/fail message
-   */
+  // Final incubation process
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
-
-    // We don't do anything if there's no web3 or no chosen contract
-    if (!web3 || !account || !chosenIncubation?.contractAddress) {
-      return;
-    }
-
+    if (!web3 || !account || !chosenIncubation?.contractAddress) return;
     setIsTransferring(true);
     setTransferStatusMessage(null);
-
-    const contract = new web3.eth.Contract(
-      nftABI,
-      chosenIncubation.contractAddress
-    );
-
-    // We'll track which tokens were successfully transferred, and which failed
+    const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
     const succeeded = [];
     const failed = [];
-
     for (let tokenId of selectedNfts) {
       try {
-        console.log(`Transferring tokenId ${tokenId}...`);
         await contract.methods
           .transferFrom(account, STAGING_WALLET, tokenId)
           .send({ from: account });
@@ -253,47 +207,25 @@ function App() {
       } catch (error) {
         console.error(`Transfer for tokenId ${tokenId} failed:`, error);
         failed.push(tokenId);
-
-        // If you want to stop after the first failure:
-        // break;
-        // If you want to keep going despite one failure:
-        // continue;
       }
     }
-
     setIsTransferring(false);
-
-    // Build a final result message
     if (failed.length === 0) {
-      // All 3 transferred
       setTransferStatusMessage("All selected NFTs transferred successfully!");
     } else if (succeeded.length === 0) {
-      // None transferred
-      setTransferStatusMessage(
-        "All selected NFT transfers failed or were cancelled."
-      );
+      setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
     } else {
-      // Partial success
       setTransferStatusMessage(
-        `Partial success:
-         Succeeded: ${succeeded.join(", ")}
-         Failed: ${failed.join(", ")}`
+        `Partial success:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(", ")}`
       );
     }
   };
 
-  // On mount or changes, if user selected a real contract, fetch their NFTs
+  // Fetch NFTs when option and wallet are set
   useEffect(() => {
-    if (
-      selectedOption &&
-      selectedOption !== "silverback" &&
-      web3 &&
-      account &&
-      chosenIncubation?.contractAddress
-    ) {
+    if (selectedOption && selectedOption !== "silverback" && web3 && account && chosenIncubation?.contractAddress) {
       fetchNFTs(web3, account, chosenIncubation.contractAddress);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOption, web3, account]);
 
   // Handle NFT selection (limit to 3)
@@ -309,7 +241,7 @@ function App() {
     }
   };
 
-  // User clicked the main incubate button, show STEPS overlay
+  // Show the steps overlay when exactly 3 NFTs are selected
   const handleIncubateClick = () => {
     if (selectedNfts.length !== 3) {
       alert("You must select exactly 3 NFTs before incubating.");
@@ -318,187 +250,196 @@ function App() {
     setShowStepsOverlay(true);
   };
 
-  // Render the 3-option menu if not selected
+  // Build content based on the current screen
+  let content;
   if (!selectedOption) {
-    return (
-      <div style={{ padding: "20px" }}>
-        <h2>Choose an Incubation Option:</h2>
-        <button onClick={() => setSelectedOption("rarity")}>
-          1) INCUBATE A RARITY
+    // Initial menu with three options in a vertically aligned container
+    content = (
+      <div className="menuBox">
+        <h2 style={{ color: "white", marginTop: 0 }}>
+          Choose an Incubation Option:
+        </h2>
+        <button className="myButton" onClick={() => setSelectedOption("rarity")}>
+          INCUBATE A RARITY
         </button>
-        <button onClick={() => setSelectedOption("gorilla")} style={{ marginLeft: 10 }}>
-          2) INCUBATE A GORILLA
+        <button className="myButton" onClick={() => setSelectedOption("gorilla")}>
+          INCUBATE A GORILLA
         </button>
-        <button onClick={() => setSelectedOption("silverback")} style={{ marginLeft: 10 }}>
-          3) INCUBATE A SILVERBACK
+        <button className="myButton" onClick={() => setSelectedOption("silverback")}>
+          INCUBATE A SILVERBACK
         </button>
       </div>
     );
-  }
-
-  // If user selected silverback, do nothing
-  if (selectedOption === "silverback") {
-    return (
-      <div style={{ padding: "20px" }}>
-        <h2>You have selected SILVERBACK INCUBATION. This does nothing.</h2>
-        <div style={{ marginTop: 10 }}>
-          <button onClick={handleGoBack}>Back to Incubation Menu</button>
-        </div>
+  } else if (selectedOption === "silverback") {
+    content = (
+      <div>
+        <h2 style={{ color: "white" }}>
+          You have selected SILVERBACK INCUBATION. NOT YET ACTIVE.
+        </h2>
+        <button className="myButton" onClick={handleGoBack}>
+          Back to Incubation Menu
+        </button>
       </div>
     );
-  }
-
-  // Otherwise, user selected 'rarity' or 'gorilla'
-  return (
-    <div style={{ padding: "20px" }}>
-      <h1>{chosenIncubation.heading}</h1>
-
-      {/* "Go Back" on its own line */}
-      <div style={{ marginBottom: 10 }}>
-        <button onClick={handleGoBack}>Back to Incubation Menu</button>
-      </div>
-
-      {/* Wallet connection UI */}
-      {!account ? (
-        <button onClick={connectWallet}>Connect Wallet</button>
-      ) : (
-        <div>
-          <p>
-            <strong>Connected Wallet:</strong> {account}
-          </p>
-          <button onClick={disconnectWallet}>Disconnect Wallet</button>
-          <button onClick={changeWallet} style={{ marginLeft: "10px" }}>
-            Change Wallet
-          </button>
-          <button onClick={() => fetchNFTs()} style={{ marginLeft: "10px" }}>
-            Refresh NFTs
-          </button>
-        </div>
-      )}
-
-      {/* Show loading message if reading NFTs */}
-      {isLoading && (
-        <p style={{ color: "blue", fontStyle: "italic", marginTop: "20px" }}>
-          Reading NFTs available...
-        </p>
-      )}
-
-      {/* NFT table */}
-      {!isLoading && nfts.length > 0 ? (
-        <table style={{ marginTop: "20px", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
-              <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
-            </tr>
-          </thead>
-          <tbody>
-            {nfts.map((nft) => (
-              <tr key={nft.tokenId}>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedNfts.includes(nft.tokenId)}
-                    onChange={() => handleSelectNFT(nft.tokenId)}
-                  />
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {nft.tokenId}
-                </td>
-                <td style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  {nft.tokenURI || "No URI"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : !isLoading && account ? (
-        <p style={{ marginTop: "20px" }}>No NFTs found for this wallet.</p>
-      ) : null}
-
-      {/* Main Incubate button */}
-      {!isLoading && nfts.length > 0 && (
-        <button
-          style={{
-            marginTop: "20px",
-            padding: "10px 20px",
-            fontSize: "16px",
-          }}
-          onClick={handleIncubateClick}
-        >
-          {chosenIncubation.buttonLabel}
+  } else {
+    content = (
+      <div style={{ marginTop: "20px" }}>
+        <h1 style={{ color: "white", textAlign: "center" }}>
+          {chosenIncubation.heading}
+        </h1>
+        <button className="myButton" onClick={handleGoBack}>
+          Back to Incubation Menu
         </button>
-      )}
-
-      {/* STEPS OVERLAY */}
-      {showStepsOverlay && (
-        <div className="confirmation-overlay">
-          <div className="confirmation-box">
-            <h2>STEPS TO INCUBATE</h2>
-            <p>
-              1) Your selected 3 NFTs will be moved from your wallet to a staging wallet<br />
-              2) An Incubated Rarity will be generated and placed in your wallet<br />
-              3) The staged wallet holding the 3 NFTs will be burnt
-            </p>
-            <p style={{ fontWeight: "bold" }}>
-              The process will incur gas fees and is irreversible.
-              <br />
-              Click OK if you wish to continue or CANCEL to stop now.
-            </p>
-            <div style={{ marginTop: "10px" }}>
-              <button
-                onClick={handleFinalIncubation}
-                style={{
-                  marginRight: "10px",
-                  padding: "8px 16px",
-                }}
-              >
-                OK
-              </button>
-              <button onClick={() => setShowStepsOverlay(false)}>CANCEL</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer In Process Overlay */}
-      {isTransferring && (
-        <div className="confirmation-overlay">
-          <div className="confirmation-box">
-            <h3>Transferring your selected NFTs...</h3>
-            <p>
-              Please confirm <strong>each transaction</strong> in your wallet to
-              transfer the tokens to <br />
-              <em>{STAGING_WALLET}</em>.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer Result Overlay (Success, Partial, or Failure) */}
-      {transferStatusMessage && !isTransferring && (
-        <div className="confirmation-overlay">
-          <div className="confirmation-box">
-            <h3>Transfer Status</h3>
-            <pre
-              style={{
-                backgroundColor: "#f5f5f5",
-                padding: "10px",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {transferStatusMessage}
-            </pre>
-            <button
-              style={{ marginTop: "10px", padding: "8px 16px" }}
-              onClick={() => setTransferStatusMessage(null)}
-            >
-              Close
+        {!account ? (
+          <button className="myButton" onClick={connectWallet}>
+            Connect Wallet
+          </button>
+        ) : (
+          <div style={{ color: "white" }}>
+            <p><strong>Connected Wallet:</strong> {account}</p>
+            <button className="myButton" onClick={disconnectWallet}>
+              Disconnect Wallet
+            </button>
+           
+            <button className="myButton" onClick={() => fetchNFTs()}>
+              Refresh NFTs
             </button>
           </div>
-        </div>
-      )}
+        )}
+        {isLoading && (
+          <p style={{ color: "yellow", fontStyle: "italic", marginTop: "20px" }}>
+            Reading NFTs available...
+          </p>
+        )}
+        {!isLoading && nfts.length > 0 ? (
+          <table
+            style={{
+              margin: "20px auto",
+              borderCollapse: "collapse",
+              color: "white",
+            }}
+          >
+            <thead>
+              <tr>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {nfts.map((nft) => (
+                <tr key={nft.tokenId}>
+                  <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedNfts.includes(nft.tokenId)}
+                      onChange={() => handleSelectNFT(nft.tokenId)}
+                    />
+                  </td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>{nft.tokenId}</td>
+                  <td style={{ border: "1px solid #ccc", padding: "8px" }}>
+                    {nft.tokenURI || "No URI"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : !isLoading && account ? (
+          <p style={{ marginTop: "20px", color: "white" }}>
+            No NFTs found for this wallet.
+          </p>
+        ) : null}
+        {!isLoading && nfts.length > 0 && (
+          <button className="myButton" onClick={handleIncubateClick}>
+            {chosenIncubation.buttonLabel}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        backgroundColor: "blue",
+        minHeight: "100vh",
+        padding: "20px",
+        boxSizing: "border-box",
+      }}
+    >
+      <h1
+        style={{
+          textAlign: "center",
+          color: "white",
+          fontSize: "3rem",
+          marginBottom: "30px",
+        }}
+      >
+        CAYC INCUBATOR
+      </h1>
+      <div
+        style={{
+          backgroundColor: "#003366",
+          margin: "0 auto",
+          minWidth: "390px",
+          maxWidth: "800px",
+          borderRadius: "20px",
+          padding: "30px",
+          textAlign: "center",
+        }}
+      >
+        {content}
+
+        {showStepsOverlay && (
+          <div className="confirmation-overlay">
+            <div className="confirmation-box">
+              <h2>STEPS TO INCUBATE</h2>
+              <p>
+                1) Your selected 3 NFTs will be moved to a staging wallet<br />
+                2) An Incubated NFT will be generated in your wallet<br />
+                3) The staging wallet holding the 3 NFTs will be burnt
+              </p>
+              <p style={{ fontWeight: "bold" }}>
+                The process will incur gas fees and is irreversible.
+                <br />
+                Click OK if you wish to continue or CANCEL to stop now.
+              </p>
+              <div style={{ marginTop: "10px" }}>
+                <button onClick={handleFinalIncubation} style={{ marginRight: "10px", padding: "8px 16px" }}>
+                  OK
+                </button>
+                <button onClick={() => setShowStepsOverlay(false)}>CANCEL</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isTransferring && (
+          <div className="confirmation-overlay">
+            <div className="confirmation-box">
+              <h3>Transferring your selected NFTs...</h3>
+              <p>
+                Please confirm <strong>each transaction</strong> in your wallet to transfer the tokens to <br />
+                <em>{STAGING_WALLET}</em>.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {transferStatusMessage && !isTransferring && (
+          <div className="confirmation-overlay">
+            <div className="confirmation-box">
+              <h3>Transfer Status</h3>
+              <pre style={{ backgroundColor: "#f5f5f5", padding: "10px", whiteSpace: "pre-wrap" }}>
+                {transferStatusMessage}
+              </pre>
+              <button style={{ marginTop: "10px", padding: "8px 16px" }} onClick={() => setTransferStatusMessage(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
