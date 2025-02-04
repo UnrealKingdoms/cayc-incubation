@@ -465,6 +465,7 @@ function App() {
     </tr>
   ))}
 </tbody>
+
 </table>
 
         ) : !isLoading && account ? (
