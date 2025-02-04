@@ -245,7 +245,7 @@ function App() {
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
     
     try {
-      const response = await fetch("/api/send-email", {
+      const response = await fetch("https://elevatecellbackend.vercel.app/api/send-email.js", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
