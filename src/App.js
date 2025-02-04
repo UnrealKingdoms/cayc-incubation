@@ -265,70 +265,87 @@ function App() {
     }
   };
 
-  // Final incubation process with improved error handling and retry logic
-  const handleFinalIncubation = async () => {
-    setShowStepsOverlay(false);
-    if (!web3 || !account || !chosenIncubation?.contractAddress) return;
-    setIsTransferring(true);
-    setTransferStatusMessage(null);
+ // Final incubation process with improved error handling and retry logic
+const handleFinalIncubation = async () => {
+  setShowStepsOverlay(false);
+  if (!web3 || !account || !chosenIncubation?.contractAddress) return;
+  setIsTransferring(true);
+  setTransferStatusMessage(null);
 
-    const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
-    const succeeded = [];
-    const failed = [];
-    const maxRetries = 3; // Maximum number of attempts per transfer
-    const delayBetweenRetries = 5000; // Delay between attempts in milliseconds
+  const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
+  const succeeded = [];
+  const failed = [];
+  const maxRetries = 3; // Maximum number of attempts per transfer
+  const delayBetweenRetries = 5000; // Delay between attempts in milliseconds
 
-    // Helper function to wait for a specified delay
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Helper function to wait for a specified delay
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    // Helper function to retry a transaction
-    const retryTransaction = async (fn, tokenId) => {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          console.log(`Attempt ${attempt} for tokenId ${tokenId}...`);
-          // Attempt the transaction
-          return await fn();
-        } catch (error) {
-          console.error(`Transfer attempt ${attempt} for tokenId ${tokenId} failed:`, error);
-          if (attempt === maxRetries) {
-            throw error;
-          }
-          // Wait before retrying
-          await wait(delayBetweenRetries);
-        }
-      }
-    };
-
-    // Loop through each selected NFT and attempt to transfer it
-    for (let tokenId of selectedNfts) {
+  // Helper function to retry a transaction
+  const retryTransaction = async (fn, tokenId) => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        await retryTransaction(
-          () =>
-            contract.methods
-              .transferFrom(account, STAGING_WALLET, tokenId)
-              .send({ from: account }),
-          tokenId
-        );
-        succeeded.push(tokenId);
+        console.log(`Attempt ${attempt} for tokenId ${tokenId}...`);
+        // Attempt the transaction
+        return await fn();
       } catch (error) {
-        console.error(`Transfer for tokenId ${tokenId} failed after ${maxRetries} attempts:`, error);
-        failed.push(tokenId);
-      }
-    }
+        // Check if the error message indicates a pending transaction
+        if (error.message && error.message.includes("already pending")) {
+          console.warn(
+            `Transaction for tokenId ${tokenId} is already pending; skipping further attempts.`
+          );
+          // Optionally, you can choose to treat a pending transaction as a success:
+          return;
+        }
 
-    setIsTransferring(false);
-    if (failed.length === 0) {
-      setTransferStatusMessage("All selected NFTs transferred successfully!");
-      // Send the email notification after all transfers succeed
-      sendEmail();
-    } else if (succeeded.length === 0) {
-      setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
-    } else {
-      setTransferStatusMessage(
-        `Partial success - Contact Support:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(", ")}`
-      );
+        console.error(`Transfer attempt ${attempt} for tokenId ${tokenId} failed:`, error);
+
+        // If this was the final attempt, rethrow the error
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        // Wait before retrying
+        await wait(delayBetweenRetries);
+      }
     }
   };
+
+  // Loop through each selected NFT and attempt to transfer it
+  for (let tokenId of selectedNfts) {
+    try {
+      await retryTransaction(
+        () =>
+          contract.methods
+            .transferFrom(account, STAGING_WALLET, tokenId)
+            .send({ from: account }),
+        tokenId
+      );
+      succeeded.push(tokenId);
+    } catch (error) {
+      console.error(
+        `Transfer for tokenId ${tokenId} failed after ${maxRetries} attempts:`,
+        error
+      );
+      failed.push(tokenId);
+    }
+  }
+
+  setIsTransferring(false);
+
+  if (failed.length === 0) {
+    setTransferStatusMessage("All selected NFTs transferred successfully!");
+    // Send the email notification after all transfers succeed
+    sendEmail();
+  } else if (succeeded.length === 0) {
+    setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
+  } else {
+    setTransferStatusMessage(
+      `Partial success - Contact Support:\nSucceeded: ${succeeded.join(
+        ", "
+      )}\nFailed: ${failed.join(", ")}`
+    );
+  }
+};
 
   // Fetch NFTs when option and wallet are set
   useEffect(() => {
