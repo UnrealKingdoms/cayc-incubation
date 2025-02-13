@@ -52,12 +52,12 @@ const nftABI = [
 // Addresses/options for each incubation type
 const incubationOptions = {
   rarity: {
-    contractAddress: "0xfd39CD1F87a237C628C42c0Efde88AC02654B775",
+    contractAddress: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
     heading: "CAYC RARITY INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A RARITY",
   },
   gorilla: {
-    contractAddress: "0x0cB81977a2147523468CA0B56cba93FA5c5CAF67",
+    contractAddress: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
     heading: "CAYC GORILLA INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A GORILLA",
   },
@@ -251,7 +251,7 @@ function App() {
     const subject = `An Incubated ${typeLabel} Ape has been made`;
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
     try {
-      const response = await fetch("https://cayc-incubator-email.vercel.app/send-email.js", {
+      const response = await fetch("https://cayc-incubator-email.vercel.app/api/send-email.js", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
