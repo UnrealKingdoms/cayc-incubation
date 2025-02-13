@@ -251,7 +251,7 @@ function App() {
     const subject = `An Incubated ${typeLabel} Ape has been made`;
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
     try {
-      const response = await fetch("https://elevatecellbackend.vercel.app/api/send-email.js", {
+      const response = await fetch("https://cayc-incubator-email.vercel.app/send-email.js", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
