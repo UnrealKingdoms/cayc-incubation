@@ -52,12 +52,12 @@ const nftABI = [
 // Addresses/options for each incubation type
 const incubationOptions = {
   rarity: {
-    contractAddress: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
+    contractAddress: "0xfd39CD1F87a237C628C42c0Efde88AC02654B775",
     heading: "CAYC RARITY INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A RARITY",
   },
   gorilla: {
-    contractAddress: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
+    contractAddress: "0x0cb81977a2147523468ca0b56cba93fa5c5caf67",
     heading: "CAYC GORILLA INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A GORILLA",
   },
