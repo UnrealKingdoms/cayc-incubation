@@ -57,6 +57,7 @@ const incubationOptions = {
     buttonLabel: "INCUBATE A RARITY",
   },
   gorilla: {
+    // Original contract for gorilla
     contractAddress: "0x0cb81977a2147523468ca0b56cba93fa5c5caf67",
     heading: "CAYC GORILLA INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A GORILLA",
@@ -69,16 +70,8 @@ const incubationOptions = {
 
 // Define small-box image paths for each incubation type using the public folder
 const smallBoxImages = {
-  rarity: [
-    "/rarity_small1.png",
-    "/rarity_small2.png",
-    "/rarity_small3.png",
-  ],
-  gorilla: [
-    "/gorilla_small1.png",
-    "/gorilla_small2.png",
-    "/gorilla_small3.png",
-  ],
+  rarity: ["/rarity_small1.png", "/rarity_small2.png", "/rarity_small3.png"],
+  gorilla: ["/gorilla_small1.png", "/gorilla_small2.png", "/gorilla_small3.png"],
   silverback: [
     "/silverback_small1.png",
     "/silverback_small2.png",
@@ -113,17 +106,6 @@ function App() {
   const chosenIncubation = selectedOption
     ? incubationOptions[selectedOption]
     : null;
-
-  // (Optional) You may still want to set a default text for the medium box,
-  // but it will be replaced by an image.
-  let mediumBoxText = "";
-  if (selectedOption === "rarity") {
-    mediumBoxText = "RARITY";
-  } else if (selectedOption === "gorilla") {
-    mediumBoxText = "GORILLA";
-  } else if (selectedOption === "silverback") {
-    mediumBoxText = "SILVERBACK";
-  }
 
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -178,62 +160,129 @@ function App() {
     setIsTransferring(false);
   };
 
+  /**
+   * Helper function to fetch all NFTs from a given contractAddress
+   * with optional minTokenId / maxTokenId filters.
+   */
+  const fetchNFTsFromContract = async (
+    providedWeb3,
+    providedAccount,
+    contractAddress,
+    minTokenId = 0,
+    maxTokenId = Infinity
+  ) => {
+    const contract = new providedWeb3.eth.Contract(nftABI, contractAddress);
+    const transferEvents = await contract.getPastEvents("Transfer", {
+      fromBlock: 0,
+      toBlock: "latest",
+    });
+
+    // A set of tokenIds that ended up in `providedAccount`.
+    // We'll double-check ownership below.
+    const userTokens = new Set();
+    transferEvents.forEach((event) => {
+      const { from, to, tokenId } = event.returnValues;
+      // Filter by desired token ID range (if min/max are passed)
+      const numId = parseInt(tokenId, 10);
+      if (numId < minTokenId || numId > maxTokenId) {
+        return; // skip if out of range
+      }
+
+      if (to.toLowerCase() === providedAccount.toLowerCase()) {
+        userTokens.add(tokenId);
+      }
+      if (from.toLowerCase() === providedAccount.toLowerCase()) {
+        userTokens.delete(tokenId);
+      }
+    });
+
+    const ownedNFTs = [];
+    for (let tokenId of userTokens) {
+      try {
+        const owner = await contract.methods.ownerOf(tokenId).call();
+        if (owner.toLowerCase() === providedAccount.toLowerCase()) {
+          let uri = "";
+          try {
+            uri = await contract.methods.tokenURI(tokenId).call();
+            if (uri.startsWith("ipfs://")) {
+              uri = uri.replace(
+                "ipfs://",
+                "https://gateway.pinata.cloud/ipfs/"
+              );
+            }
+          } catch (err) {
+            console.warn(`Could not get tokenURI for ${tokenId}`, err);
+          }
+          let image = "";
+          try {
+            const response = await fetch(uri);
+            const metadata = await response.json();
+            image = metadata.image || "";
+            if (image.startsWith("ipfs://")) {
+              image = image.replace(
+                "ipfs://",
+                "https://gateway.pinata.cloud/ipfs/"
+              );
+            }
+          } catch (err) {
+            console.warn(`Could not fetch metadata for ${tokenId}`, err);
+          }
+          ownedNFTs.push({ tokenId, tokenURI: uri, image });
+        }
+      } catch (err) {
+        console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
+      }
+    }
+
+    return ownedNFTs;
+  };
+
+  /**
+   * Main NFT fetching function (modified to handle gorilla scenario from two contracts).
+   */
   const fetchNFTs = async (
     providedWeb3 = web3,
     providedAccount = account,
     contractAddress = chosenIncubation?.contractAddress
   ) => {
     if (!providedWeb3 || !providedAccount || !contractAddress) return;
-    try {
-      setIsLoading(true);
-      const contract = new providedWeb3.eth.Contract(nftABI, contractAddress);
-      const transferEvents = await contract.getPastEvents("Transfer", {
-        fromBlock: 0,
-        toBlock: "latest",
-      });
-      const userTokens = new Set();
-      transferEvents.forEach((event) => {
-        const { from, to, tokenId } = event.returnValues;
-        if (to.toLowerCase() === providedAccount.toLowerCase()) {
-          userTokens.add(tokenId);
-        }
-        if (from.toLowerCase() === providedAccount.toLowerCase()) {
-          userTokens.delete(tokenId);
-        }
-      });
 
-      const ownedNFTs = [];
-      for (let tokenId of userTokens) {
-        try {
-          const owner = await contract.methods.ownerOf(tokenId).call();
-          if (owner.toLowerCase() === providedAccount.toLowerCase()) {
-            let uri = "";
-            try {
-              uri = await contract.methods.tokenURI(tokenId).call();
-              if (uri.startsWith("ipfs://")) {
-                uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-              }
-            } catch (err) {
-              console.warn(`Could not get tokenURI for ${tokenId}`, err);
-            }
-            let image = "";
-            try {
-              const response = await fetch(uri);
-              const metadata = await response.json();
-              image = metadata.image || "";
-              if (image.startsWith("ipfs://")) {
-                image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-              }
-            } catch (err) {
-              console.warn(`Could not fetch metadata for ${tokenId}`, err);
-            }
-            ownedNFTs.push({ tokenId, tokenURI: uri, image });
-          }
-        } catch (err) {
-          console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
-        }
+    setIsLoading(true);
+    try {
+      // If user selected "gorilla", read from both contracts:
+      // 1) 0x0cb81977a2147523468ca0b56cba93fa5c5caf67 (full range)
+      // 2) 0xdb5c9ac6089d6cca205f54ee19bd151e419cac63 (token IDs 1000 to 2000 only)
+      if (selectedOption === "gorilla") {
+        const firstContract = "0x0cb81977a2147523468ca0b56cba93fa5c5caf67";
+        const secondContract = "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63";
+
+        // Fetch from first (original) contract
+        const gorillaNfts1 = await fetchNFTsFromContract(
+          providedWeb3,
+          providedAccount,
+          firstContract
+        );
+
+        // Fetch from second contract for token IDs in [1000..2000]
+        const gorillaNfts2 = await fetchNFTsFromContract(
+          providedWeb3,
+          providedAccount,
+          secondContract,
+          1000,
+          2000
+        );
+
+        // Combine them
+        setNfts([...gorillaNfts1, ...gorillaNfts2]);
+      } else {
+        // Rarity or silverback, just do the single-contract fetch
+        const result = await fetchNFTsFromContract(
+          providedWeb3,
+          providedAccount,
+          contractAddress
+        );
+        setNfts(result);
       }
-      setNfts(ownedNFTs);
     } catch (error) {
       console.error("Error fetching NFTs:", error);
     } finally {
@@ -249,13 +298,18 @@ function App() {
         ? "GORILLA"
         : "SILVERBACK";
     const subject = `An Incubated ${typeLabel} Ape has been made`;
-    const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
+    const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(
+      ", "
+    )}`;
     try {
-      const response = await fetch("https://cayc-incubator-email.vercel.app/api/send-email.js", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
-      });
+      const response = await fetch(
+        "https://cayc-incubator-email.vercel.app/api/send-email.js",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
+        }
+      );
       if (!response.ok) {
         console.error("Failed to send email:", response.statusText);
       }
@@ -346,11 +400,15 @@ function App() {
         stagger: 0.2,
         ease: "power1.inOut"
       })
-        .to(".smallBox", {
-          opacity: 0,
-          duration: 0.5,
-          ease: "power1.inOut"
-        }, "+=0.1")
+        .to(
+          ".smallBox",
+          {
+            opacity: 0,
+            duration: 0.5,
+            ease: "power1.inOut"
+          },
+          "+=0.1"
+        )
         .set(".smallBox", { x: 0, opacity: 0 })
         .to(".mediumBox", {
           opacity: 1,
@@ -426,9 +484,7 @@ function App() {
               </div>
             ))}
           </div>
-          {/* Updated triangle incubator image */}
           <img className="triangle" src="/incubatortp.png" alt="Incubator" />
-          {/* Replace the medium box text with an image */}
           <div className="mediumBox" ref={mediumBoxRef}>
             <img
               src={mediumBoxImages.silverback}
@@ -437,7 +493,9 @@ function App() {
             />
           </div>
         </div>
-        <p style={{ color: "white" }}>SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.</p>
+        <p style={{ color: "white" }}>
+          SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.
+        </p>
         <button className="myButton" onClick={handleGoBack}>
           Back to Incubation Menu
         </button>
@@ -461,9 +519,7 @@ function App() {
               </div>
             ))}
           </div>
-          {/* Updated triangle incubator image */}
           <img className="triangle" src="/incubatortp.png" alt="Incubator" />
-          {/* Replace the medium box text with an image based on the selected option */}
           <div className="mediumBox" ref={mediumBoxRef}>
             <img
               src={mediumBoxImages[selectedOption]}
@@ -510,10 +566,18 @@ function App() {
           >
             <thead>
               <tr>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  Select
+                </th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  Token ID
+                </th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  Token URI
+                </th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
+                  Image
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -604,8 +668,11 @@ function App() {
             <div className="confirmation-box">
               <h2>STEPS TO INCUBATE</h2>
               <p>
-                1) Your selected 3 NFTs will be moved to a staging wallet<br />
-                2) An Incubated NFT will be generated within 24hrs and sent to your wallet<br />
+                1) Your selected 3 NFTs will be moved to a staging wallet
+                <br />
+                2) An Incubated NFT will be generated within 24hrs and sent to
+                your wallet
+                <br />
                 3) The staging wallet holding the 3 NFTs will be burnt
               </p>
               <p style={{ fontWeight: "bold" }}>
@@ -620,9 +687,7 @@ function App() {
                 >
                   OK
                 </button>
-                <button onClick={() => setShowStepsOverlay(false)}>
-                  CANCEL
-                </button>
+                <button onClick={() => setShowStepsOverlay(false)}>CANCEL</button>
               </div>
             </div>
           </div>
@@ -633,7 +698,8 @@ function App() {
             <div className="confirmation-box">
               <h3>Transferring your selected NFTs...</h3>
               <p>
-                Please confirm <strong>each transaction</strong> in your wallet to transfer the tokens to <br />
+                Please confirm <strong>each transaction</strong> in your wallet
+                to transfer the tokens to <br />
                 <em>{STAGING_WALLET}</em>.
               </p>
             </div>
