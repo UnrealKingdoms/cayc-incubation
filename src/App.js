@@ -246,43 +246,63 @@ function App() {
     contractAddress = chosenIncubation?.contractAddress
   ) => {
     if (!providedWeb3 || !providedAccount || !contractAddress) return;
-
-    setIsLoading(true);
     try {
-      // If user selected "gorilla", read from both contracts:
-      // 1) 0x0cb81977a2147523468ca0b56cba93fa5c5caf67 (full range)
-      // 2) 0xdb5c9ac6089d6cca205f54ee19bd151e419cac63 (token IDs 1000 to 2000 only)
-      if (selectedOption === "gorilla") {
-        const firstContract = "0x0cb81977a2147523468ca0b56cba93fa5c5caf67";
-        const secondContract = "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63";
-
-        // Fetch from first (original) contract
-        const gorillaNfts1 = await fetchNFTsFromContract(
-          providedWeb3,
-          providedAccount,
-          firstContract
-        );
-
-        // Fetch from second contract for token IDs in [1000..2000]
-        const gorillaNfts2 = await fetchNFTsFromContract(
-          providedWeb3,
-          providedAccount,
-          secondContract,
-          1000,
-          2000
-        );
-
-        // Combine them
-        setNfts([...gorillaNfts1, ...gorillaNfts2]);
-      } else {
-        // Rarity or silverback, just do the single-contract fetch
-        const result = await fetchNFTsFromContract(
-          providedWeb3,
-          providedAccount,
-          contractAddress
-        );
-        setNfts(result);
+      setIsLoading(true);
+      const contracts = [
+        { address: contractAddress, contract: new providedWeb3.eth.Contract(nftABI, contractAddress) },
+        { address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63", contract: new providedWeb3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63") },
+      ];
+  
+      const ownedNFTs = [];
+      for (let { address, contract } of contracts) {
+        const transferEvents = await contract.getPastEvents("Transfer", {
+          fromBlock: 0,
+          toBlock: "latest",
+        });
+        const userTokens = new Set();
+        transferEvents.forEach((event) => {
+          const { from, to, tokenId } = event.returnValues;
+          if (to.toLowerCase() === providedAccount.toLowerCase()) {
+            userTokens.add(tokenId);
+          }
+          if (from.toLowerCase() === providedAccount.toLowerCase()) {
+            userTokens.delete(tokenId);
+          }
+        });
+  
+        for (let tokenId of userTokens) {
+          try {
+            const owner = await contract.methods.ownerOf(tokenId).call();
+            if (owner.toLowerCase() === providedAccount.toLowerCase()) {
+              let uri = "";
+              try {
+                uri = await contract.methods.tokenURI(tokenId).call();
+                if (uri.startsWith("ipfs://")) {
+                  uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+                }
+              } catch (err) {
+                console.warn(`Could not get tokenURI for ${tokenId}`, err);
+              }
+              let image = "";
+              try {
+                const response = await fetch(uri);
+                const metadata = await response.json();
+                image = metadata.image || "";
+                if (image.startsWith("ipfs://")) {
+                  image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+                }
+              } catch (err) {
+                console.warn(`Could not fetch metadata for ${tokenId}`, err);
+              }
+              ownedNFTs.push({ tokenId, tokenURI: uri, image, contractAddress: address });
+            }
+          } catch (err) {
+            console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
+          }
+        }
       }
+  
+      setNfts(ownedNFTs);
     } catch (error) {
       console.error("Error fetching NFTs:", error);
     } finally {
@@ -320,16 +340,21 @@ function App() {
 
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
-    if (!web3 || !account || !chosenIncubation?.contractAddress) return;
+    if (!web3 || !account) return; // Ensure web3 and account are available
     setIsTransferring(true);
     setTransferStatusMessage(null);
-
-    const contract = new web3.eth.Contract(nftABI, chosenIncubation.contractAddress);
+  
+    const contracts = [
+      { address: chosenIncubation.contractAddress, contract: new web3.eth.Contract(nftABI, chosenIncubation.contractAddress) },
+      { address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63", contract: new web3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63") },
+    ];
+  
     const succeeded = [];
     const failed = [];
     const maxRetries = 3;
     const delayBetweenRetries = 5000;
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  
     const retryTransaction = async (fn, tokenId) => {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -345,22 +370,34 @@ function App() {
         }
       }
     };
-
+  
     for (let tokenId of selectedNfts) {
       try {
+        // Determine which contract the token belongs to
+        const contract = contracts.find((c) => {
+          return nfts.some((nft) => nft.tokenId === tokenId && nft.contractAddress === c.address);
+        });
+  
+        if (!contract) {
+          console.error(`No contract found for tokenId ${tokenId}`);
+          failed.push(tokenId);
+          continue;
+        }
+  
         await retryTransaction(
           () =>
-            contract.methods
+            contract.contract.methods
               .transferFrom(account, STAGING_WALLET, tokenId)
               .send({ from: account }),
           tokenId
         );
         succeeded.push(tokenId);
       } catch (error) {
+        console.error(`Failed to transfer tokenId ${tokenId}:`, error);
         failed.push(tokenId);
       }
     }
-
+  
     setIsTransferring(false);
     if (failed.length === 0) {
       setTransferStatusMessage("All selected NFTs transferred successfully!");
