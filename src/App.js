@@ -248,13 +248,34 @@ function App() {
     if (!providedWeb3 || !providedAccount || !contractAddress) return;
     try {
       setIsLoading(true);
-      const contracts = [
-        { address: contractAddress, contract: new providedWeb3.eth.Contract(nftABI, contractAddress) },
-        { address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63", contract: new providedWeb3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63") },
-      ];
+  
+      // Define contracts and their conditions based on the selected option
+      const contracts = [];
+      if (selectedOption === "rarity") {
+        // For Rarity, only fetch from the Rarity contract
+        contracts.push({
+          address: "0xfd39CD1F87a237C628C42c0Efde88AC02654B775",
+          contract: new providedWeb3.eth.Contract(nftABI, "0xfd39CD1F87a237C628C42c0Efde88AC02654B775"),
+          filter: (tokenId) => true, // No token ID filtering for Rarity
+        });
+      } else if (selectedOption === "gorilla") {
+        // For Gorilla, fetch from both contracts with token ID filtering for the second contract
+        contracts.push(
+          {
+            address: "0x0cb81977a2147523468ca0b56cba93fa5c5caf67",
+            contract: new providedWeb3.eth.Contract(nftABI, "0x0cb81977a2147523468ca0b56cba93fa5c5caf67"),
+            filter: (tokenId) => true, // No token ID filtering for the first Gorilla contract
+          },
+          {
+            address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
+            contract: new providedWeb3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63"),
+            filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000, // Filter token IDs 1000-2000 for the second Gorilla contract
+          }
+        );
+      }
   
       const ownedNFTs = [];
-      for (let { address, contract } of contracts) {
+      for (let { address, contract, filter } of contracts) {
         const transferEvents = await contract.getPastEvents("Transfer", {
           fromBlock: 0,
           toBlock: "latest",
@@ -271,6 +292,7 @@ function App() {
         });
   
         for (let tokenId of userTokens) {
+          if (!filter(tokenId)) continue; // Skip tokens that don't match the filter
           try {
             const owner = await contract.methods.ownerOf(tokenId).call();
             if (owner.toLowerCase() === providedAccount.toLowerCase()) {
