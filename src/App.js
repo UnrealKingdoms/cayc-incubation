@@ -360,79 +360,116 @@ function App() {
     }
   };
 
+  /**
+   * Updated error-handling logic:
+   * For each selected NFT, we attempt to transfer it individually.
+   * If one or more transfers fail, the user is shown a summary of token IDs
+   * that succeeded and that failed, and then prompted to ensure they have enough ETH
+   * to cover gas fees and to retry the failed transfers.
+   */
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
-    if (!web3 || !account) return; // Ensure web3 and account are available
+    if (!web3 || !account) return;
     setIsTransferring(true);
     setTransferStatusMessage(null);
-  
-    const contracts = [
-      { address: chosenIncubation.contractAddress, contract: new web3.eth.Contract(nftABI, chosenIncubation.contractAddress) },
-      { address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63", contract: new web3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63") },
-    ];
-  
-    const succeeded = [];
-    const failed = [];
-    const maxRetries = 3;
-    const delayBetweenRetries = 5000;
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  
-    const retryTransaction = async (fn, tokenId) => {
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          return await fn();
-        } catch (error) {
-          if (error.message && error.message.includes("already pending")) {
-            return;
-          }
-          if (attempt === maxRetries) {
-            throw error;
-          }
-          await wait(delayBetweenRetries);
-        }
-      }
-    };
-  
+
+    let succeeded = [];
+    let failed = [];
+
+    // First pass: attempt to transfer each selected NFT individually.
     for (let tokenId of selectedNfts) {
       try {
-        // Determine which contract the token belongs to
-        const contract = contracts.find((c) => {
-          return nfts.some((nft) => nft.tokenId === tokenId && nft.contractAddress === c.address);
-        });
-  
-        if (!contract) {
-          console.error(`No contract found for tokenId ${tokenId}`);
+        // Find which contract the NFT belongs to by checking the nfts array.
+        const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
+        if (!nftItem) {
+          console.error(`NFT with tokenId ${tokenId} not found`);
           failed.push(tokenId);
           continue;
         }
-  
-        await retryTransaction(
-          () =>
-            contract.contract.methods
-              .transferFrom(account, STAGING_WALLET, tokenId)
-              .send({ from: account }),
-          tokenId
-        );
+
+        // Create a new contract instance for the NFT contract.
+        const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+        await nftContract.methods
+          .transferFrom(account, STAGING_WALLET, tokenId)
+          .send({ from: account });
         succeeded.push(tokenId);
       } catch (error) {
         console.error(`Failed to transfer tokenId ${tokenId}:`, error);
         failed.push(tokenId);
       }
     }
-  
-    setIsTransferring(false);
-    if (failed.length === 0) {
-      setTransferStatusMessage("All selected NFTs transferred successfully!");
-      sendEmail();
-    } else if (succeeded.length === 0) {
-      setTransferStatusMessage("All selected NFT transfers failed or were cancelled.");
-    } else {
-      setTransferStatusMessage(
-        `Partial success - Contact Support:\nSucceeded: ${succeeded.join(
+
+    // If some transfers failed, prompt the user to retry.
+    if (failed.length > 0) {
+      let initialMsg = "";
+      if (succeeded.length > 0) {
+        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(
           ", "
-        )}\nFailed: ${failed.join(", ")}`
+        )}.\n\n`;
+      }
+      initialMsg += `The following token IDs failed to transfer: ${failed.join(
+        ", "
+      )}.\n\nPlease ensure you have enough ETH to cover gas fees.\nWould you like to retry transferring these failed NFTs?`;
+
+      const userConfirmed = window.confirm(initialMsg);
+
+      if (userConfirmed) {
+        let retryFailed = [];
+        for (let tokenId of failed) {
+          try {
+            const nftItem = nfts.find(
+              (n) => String(n.tokenId) === String(tokenId)
+            );
+            if (!nftItem) {
+              console.error(`NFT with tokenId ${tokenId} not found on retry`);
+              retryFailed.push(tokenId);
+              continue;
+            }
+            const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+            await nftContract.methods
+              .transferFrom(account, STAGING_WALLET, tokenId)
+              .send({ from: account });
+            succeeded.push(tokenId);
+          } catch (error) {
+            console.error(`Retry failed for tokenId ${tokenId}:`, error);
+            retryFailed.push(tokenId);
+          }
+        }
+        if (retryFailed.length > 0) {
+          setTransferStatusMessage(
+            `Transfer Summary:\nSucceeded: ${succeeded.join(
+              ", "
+            )}\nFailed: ${retryFailed.join(
+              ", "
+            )}\n\nSome transfers still failed after retry. Please contact support for assistance.`
+          );
+        } else {
+          setTransferStatusMessage(
+            `All transfers succeeded after retry!\nTransferred token IDs: ${succeeded.join(
+              ", "
+            )}`
+          );
+          sendEmail();
+        }
+      } else {
+        setTransferStatusMessage(
+          `Transfer Summary:\nSucceeded: ${succeeded.join(
+            ", "
+          )}\nFailed: ${failed.join(
+            ", "
+          )}\n\nTransfers failed. Please ensure you have enough ETH for gas fees or contact support for assistance.`
+        );
+      }
+    } else {
+      // All transfers succeeded on the first pass.
+      setTransferStatusMessage(
+        `All selected NFTs transferred successfully!\nTransferred token IDs: ${succeeded.join(
+          ", "
+        )}`
       );
+      sendEmail();
     }
+    setIsTransferring(false);
   };
 
   useEffect(() => {
