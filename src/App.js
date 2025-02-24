@@ -57,14 +57,15 @@ const incubationOptions = {
     buttonLabel: "INCUBATE A RARITY",
   },
   gorilla: {
-    // Original contract for gorilla
+    // For Gorilla, one contract is used fully and the second only for a tokenID range.
     contractAddress: "0x0cb81977a2147523468ca0b56cba93fa5c5caf67",
     heading: "CAYC GORILLA INCUBATION CHAMBER",
     buttonLabel: "INCUBATE A GORILLA",
   },
   silverback: {
-    heading: "SILVERBACK INCUBATION (Not Active)",
-    buttonLabel: "",
+    contractAddress: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
+    heading: "SILVERBACK INCUBATION CHAMBER",
+    buttonLabel: "INCUBATE A SILVERBACK",
   },
 };
 
@@ -103,9 +104,7 @@ function App() {
   // Reference for the medium box (if needed)
   const mediumBoxRef = useRef(null);
 
-  const chosenIncubation = selectedOption
-    ? incubationOptions[selectedOption]
-    : null;
+  const chosenIncubation = selectedOption ? incubationOptions[selectedOption] : null;
 
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -141,7 +140,7 @@ function App() {
       setWeb3(_web3);
       const accounts = await _web3.eth.getAccounts();
       setAccount(accounts[0]);
-      if (selectedOption !== "silverback" && chosenIncubation) {
+      if (chosenIncubation) {
         fetchNFTs(_web3, accounts[0], chosenIncubation.contractAddress);
       }
     } catch (error) {
@@ -178,16 +177,13 @@ function App() {
     });
 
     // A set of tokenIds that ended up in `providedAccount`.
-    // We'll double-check ownership below.
     const userTokens = new Set();
     transferEvents.forEach((event) => {
       const { from, to, tokenId } = event.returnValues;
-      // Filter by desired token ID range (if min/max are passed)
       const numId = parseInt(tokenId, 10);
       if (numId < minTokenId || numId > maxTokenId) {
-        return; // skip if out of range
+        return;
       }
-
       if (to.toLowerCase() === providedAccount.toLowerCase()) {
         userTokens.add(tokenId);
       }
@@ -205,10 +201,7 @@ function App() {
           try {
             uri = await contract.methods.tokenURI(tokenId).call();
             if (uri.startsWith("ipfs://")) {
-              uri = uri.replace(
-                "ipfs://",
-                "https://gateway.pinata.cloud/ipfs/"
-              );
+              uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
             }
           } catch (err) {
             console.warn(`Could not get tokenURI for ${tokenId}`, err);
@@ -219,10 +212,7 @@ function App() {
             const metadata = await response.json();
             image = metadata.image || "";
             if (image.startsWith("ipfs://")) {
-              image = image.replace(
-                "ipfs://",
-                "https://gateway.pinata.cloud/ipfs/"
-              );
+              image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
             }
           } catch (err) {
             console.warn(`Could not fetch metadata for ${tokenId}`, err);
@@ -233,12 +223,12 @@ function App() {
         console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
       }
     }
-
     return ownedNFTs;
   };
 
   /**
-   * Main NFT fetching function (modified to handle gorilla scenario from two contracts).
+   * Main NFT fetching function.
+   * Updated to include silverback functionality.
    */
   const fetchNFTs = async (
     providedWeb3 = web3,
@@ -252,26 +242,32 @@ function App() {
       // Define contracts and their conditions based on the selected option
       const contracts = [];
       if (selectedOption === "rarity") {
-        // For Rarity, only fetch from the Rarity contract
         contracts.push({
-          address: "0xfd39CD1F87a237C628C42c0Efde88AC02654B775",
-          contract: new providedWeb3.eth.Contract(nftABI, "0xfd39CD1F87a237C628C42c0Efde88AC02654B775"),
-          filter: (tokenId) => true, // No token ID filtering for Rarity
+          address: incubationOptions.rarity.contractAddress,
+          contract: new providedWeb3.eth.Contract(nftABI, incubationOptions.rarity.contractAddress),
+          filter: (tokenId) => true,
         });
       } else if (selectedOption === "gorilla") {
-        // For Gorilla, fetch from both contracts with token ID filtering for the second contract
+        // Gorilla uses two contracts with different token ID filters.
         contracts.push(
           {
-            address: "0x0cb81977a2147523468ca0b56cba93fa5c5caf67",
-            contract: new providedWeb3.eth.Contract(nftABI, "0x0cb81977a2147523468ca0b56cba93fa5c5caf67"),
-            filter: (tokenId) => true, // No token ID filtering for the first Gorilla contract
+            address: incubationOptions.gorilla.contractAddress,
+            contract: new providedWeb3.eth.Contract(nftABI, incubationOptions.gorilla.contractAddress),
+            filter: (tokenId) => true,
           },
           {
             address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
             contract: new providedWeb3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63"),
-            filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000, // Filter token IDs 1000-2000 for the second Gorilla contract
+            filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000,
           }
         );
+      } else if (selectedOption === "silverback") {
+        // For Silverback, only fetch tokens with IDs between 3000 and 4000.
+        contracts.push({
+          address: chosenIncubation.contractAddress,
+          contract: new providedWeb3.eth.Contract(nftABI, chosenIncubation.contractAddress),
+          filter: (tokenId) => tokenId >= 3000 && tokenId <= 4000,
+        });
       }
   
       const ownedNFTs = [];
@@ -292,7 +288,7 @@ function App() {
         });
   
         for (let tokenId of userTokens) {
-          if (!filter(tokenId)) continue; // Skip tokens that don't match the filter
+          if (!filter(tokenId)) continue;
           try {
             const owner = await contract.methods.ownerOf(tokenId).call();
             if (owner.toLowerCase() === providedAccount.toLowerCase()) {
@@ -339,33 +335,48 @@ function App() {
         : selectedOption === "gorilla"
         ? "GORILLA"
         : "SILVERBACK";
-    const subject = `An Incubated ${typeLabel} Ape has been made`;
-    const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(
-      ", "
-    )}`;
-    try {
-      const response = await fetch(
-        "https://cayc-incubator-email.vercel.app/api/send-email.js",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
+    const baseSubject = `An Incubated ${typeLabel} Ape has been made`;
+    const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
+    
+    let success = false;
+    let attempt = 0;
+    
+    while (attempt < 3 && !success) {
+      // Append the retry number to the subject on retries.
+      const subject = attempt > 0 ? `${baseSubject} - Retry ${attempt}` : baseSubject;
+      
+      try {
+        const response = await fetch(
+          "https://cayc-incubator-email.vercel.app/api/send-email.js",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ to: "admin@cayc.io", subject, body }),
+          }
+        );
+        if (response.ok) {
+          success = true;
+        } else {
+          console.error(`Attempt ${attempt + 1}: Failed to send email: ${response.statusText}`);
+          attempt++;
         }
-      );
-      if (!response.ok) {
-        console.error("Failed to send email:", response.statusText);
+      } catch (error) {
+        console.error(`Attempt ${attempt + 1}: Error sending email:`, error);
+        attempt++;
       }
-    } catch (error) {
-      console.error("Error sending email:", error);
+    }
+    
+    if (!success) {
+      // Append a feedback message that the transfers succeeded but the email failed.
+      setTransferStatusMessage((prevMessage) =>
+        (prevMessage ? prevMessage + "\n\n" : "") +
+        "Note: The transfers were successful, but the email notification failed to send. Please contact admins."
+      );
     }
   };
 
   /**
-   * Updated error-handling logic:
-   * For each selected NFT, we attempt to transfer it individually.
-   * If one or more transfers fail, the user is shown a summary of token IDs
-   * that succeeded and that failed, and then prompted to ensure they have enough ETH
-   * to cover gas fees and to retry the failed transfers.
+   * Updated error-handling logic for NFT transfers.
    */
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
@@ -376,18 +387,15 @@ function App() {
     let succeeded = [];
     let failed = [];
 
-    // First pass: attempt to transfer each selected NFT individually.
+    // Attempt to transfer each selected NFT individually.
     for (let tokenId of selectedNfts) {
       try {
-        // Find which contract the NFT belongs to by checking the nfts array.
         const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
         if (!nftItem) {
           console.error(`NFT with tokenId ${tokenId} not found`);
           failed.push(tokenId);
           continue;
         }
-
-        // Create a new contract instance for the NFT contract.
         const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
         await nftContract.methods
           .transferFrom(account, STAGING_WALLET, tokenId)
@@ -399,13 +407,10 @@ function App() {
       }
     }
 
-    // If some transfers failed, prompt the user to retry.
     if (failed.length > 0) {
       let initialMsg = "";
       if (succeeded.length > 0) {
-        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(
-          ", "
-        )}.\n\n`;
+        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(", ")}.\n\n`;
       }
       initialMsg += `The following token IDs failed to transfer: ${failed.join(
         ", "
@@ -417,9 +422,7 @@ function App() {
         let retryFailed = [];
         for (let tokenId of failed) {
           try {
-            const nftItem = nfts.find(
-              (n) => String(n.tokenId) === String(tokenId)
-            );
+            const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
             if (!nftItem) {
               console.error(`NFT with tokenId ${tokenId} not found on retry`);
               retryFailed.push(tokenId);
@@ -437,55 +440,42 @@ function App() {
         }
         if (retryFailed.length > 0) {
           setTransferStatusMessage(
-            `Transfer Summary:\nSucceeded: ${succeeded.join(
-              ", "
-            )}\nFailed: ${retryFailed.join(
+            `Transfer Summary:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${retryFailed.join(
               ", "
             )}\n\nSome transfers still failed after retry. Please contact support for assistance.`
           );
         } else {
           setTransferStatusMessage(
-            `All transfers succeeded after retry!\nTransferred token IDs: ${succeeded.join(
-              ", "
-            )}`
+            `All transfers succeeded after retry!\nTransferred token IDs: ${succeeded.join(", ")}`
           );
           sendEmail();
         }
       } else {
         setTransferStatusMessage(
-          `Transfer Summary:\nSucceeded: ${succeeded.join(
-            ", "
-          )}\nFailed: ${failed.join(
+          `Transfer Summary:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(
             ", "
           )}\n\nTransfers failed. Please ensure you have enough ETH for gas fees or contact support for assistance.`
         );
       }
     } else {
-      // All transfers succeeded on the first pass.
       setTransferStatusMessage(
-        `All selected NFTs transferred successfully!\nTransferred token IDs: ${succeeded.join(
-          ", "
-        )}`
+        `All selected NFTs transferred successfully!\nTransferred token IDs: ${succeeded.join(", ")}`
       );
       sendEmail();
     }
     setIsTransferring(false);
   };
 
+  // Fetch NFTs when the option, wallet, or account changes.
   useEffect(() => {
-    if (
-      selectedOption &&
-      selectedOption !== "silverback" &&
-      web3 &&
-      account &&
-      chosenIncubation?.contractAddress
-    ) {
+    if (selectedOption && web3 && account && chosenIncubation?.contractAddress) {
       fetchNFTs(web3, account, chosenIncubation.contractAddress);
     }
   }, [selectedOption, web3, account]);
 
+  // GSAP animation for the boxes (applies to all options)
   useEffect(() => {
-    if (selectedOption && selectedOption !== "silverback") {
+    if (selectedOption) {
       const tl = gsap.timeline({ repeat: -1 });
       tl.set(".smallBox", { opacity: 0 });
       tl.to({}, { duration: 1 });
@@ -559,41 +549,6 @@ function App() {
         </button>
         <button className="myButton" onClick={() => setSelectedOption("silverback")}>
           INCUBATE A SILVERBACK
-        </button>
-      </div>
-    );
-  } else if (selectedOption === "silverback") {
-    content = (
-      <div style={{ marginTop: "20px" }}>
-        <h1 style={{ color: "white", textAlign: "center" }}>
-          {incubationOptions.silverback.heading}
-        </h1>
-        <div className="boxAnimationContainer">
-          <div className="smallBoxesContainer">
-            {smallBoxImages.silverback.map((src, index) => (
-              <div className="smallBox" key={index}>
-                <img
-                  src={src}
-                  alt={`Small box ${index + 1}`}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              </div>
-            ))}
-          </div>
-          <img className="triangle" src="/incubatortp.png" alt="Incubator" />
-          <div className="mediumBox" ref={mediumBoxRef}>
-            <img
-              src={mediumBoxImages.silverback}
-              alt="Medium Box - Silverback"
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          </div>
-        </div>
-        <p style={{ color: "white" }}>
-          SILVERBACK INCUBATION. NOT ACTIVE CURRENTLY.
-        </p>
-        <button className="myButton" onClick={handleGoBack}>
-          Back to Incubation Menu
         </button>
       </div>
     );
