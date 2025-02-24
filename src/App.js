@@ -376,7 +376,7 @@ function App() {
   };
 
   /**
-   * Updated error-handling logic for NFT transfers.
+   * Updated error-handling logic for NFT transfers with owner verification in both loops.
    */
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
@@ -387,7 +387,7 @@ function App() {
     let succeeded = [];
     let failed = [];
 
-    // Attempt to transfer each selected NFT individually.
+    // Main transfer loop
     for (let tokenId of selectedNfts) {
       try {
         const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
@@ -402,11 +402,27 @@ function App() {
           .send({ from: account });
         succeeded.push(tokenId);
       } catch (error) {
-        console.error(`Failed to transfer tokenId ${tokenId}:`, error);
-        failed.push(tokenId);
+        // Check if the NFT was already transferred despite the error.
+        try {
+          const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
+          if (nftItem) {
+            const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+            const currentOwner = await nftContract.methods.ownerOf(tokenId).call();
+            if (currentOwner.toLowerCase() === STAGING_WALLET.toLowerCase()) {
+              console.log(`Token ${tokenId} is already transferred (post-error).`);
+              succeeded.push(tokenId);
+              continue;
+            }
+          }
+          failed.push(tokenId);
+        } catch (innerError) {
+          console.error(`Failed to verify transfer for tokenId ${tokenId}:`, innerError);
+          failed.push(tokenId);
+        }
       }
     }
 
+    // If some transfers failed, offer a retry.
     if (failed.length > 0) {
       let initialMsg = "";
       if (succeeded.length > 0) {
@@ -434,8 +450,23 @@ function App() {
               .send({ from: account });
             succeeded.push(tokenId);
           } catch (error) {
-            console.error(`Retry failed for tokenId ${tokenId}:`, error);
-            retryFailed.push(tokenId);
+            // Check again if the transfer actually succeeded.
+            try {
+              const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
+              if (nftItem) {
+                const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+                const currentOwner = await nftContract.methods.ownerOf(tokenId).call();
+                if (currentOwner.toLowerCase() === STAGING_WALLET.toLowerCase()) {
+                  console.log(`Token ${tokenId} is already transferred (retry check).`);
+                  succeeded.push(tokenId);
+                  continue;
+                }
+              }
+              retryFailed.push(tokenId);
+            } catch (innerError) {
+              console.error(`Retry failed for tokenId ${tokenId} during verification:`, innerError);
+              retryFailed.push(tokenId);
+            }
           }
         }
         if (retryFailed.length > 0) {
