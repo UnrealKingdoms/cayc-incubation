@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Web3 from "web3";
 import gsap from "gsap";
 import "./App.css";
@@ -103,8 +103,37 @@ function App() {
 
   // Reference for the medium box (if needed)
   const mediumBoxRef = useRef(null);
-
   const chosenIncubation = selectedOption ? incubationOptions[selectedOption] : null;
+
+  // Enhanced Wallet Integration: Listen for account and chain changes.
+  useEffect(() => {
+    if (window.ethereum) {
+      const handleAccountsChanged = (accounts) => {
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+        } else {
+          // No accounts available, gracefully disconnect.
+          disconnectWallet();
+          alert("Wallet disconnected. Please reconnect.");
+        }
+      };
+
+      const handleChainChanged = (_chainId) => {
+        // Reload page on network change.
+        window.location.reload();
+      };
+
+      window.ethereum.on("accountsChanged", handleAccountsChanged);
+      window.ethereum.on("chainChanged", handleChainChanged);
+
+      return () => {
+        if (window.ethereum.removeListener) {
+          window.ethereum.removeListener("accountsChanged", handleAccountsChanged);
+          window.ethereum.removeListener("chainChanged", handleChainChanged);
+        }
+      };
+    }
+  }, []);
 
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -118,7 +147,8 @@ function App() {
       const accounts = await _web3.eth.getAccounts();
       setAccount(accounts[0]);
     } catch (error) {
-      console.error("User denied account access or error:", error);
+      console.error("Error connecting wallet:", error);
+      alert("Failed to connect wallet. Please try again.");
     }
   };
 
@@ -145,6 +175,7 @@ function App() {
       }
     } catch (error) {
       console.error("Error changing wallet:", error);
+      alert("Failed to change wallet. Please try again.");
     }
   };
 
@@ -160,174 +191,210 @@ function App() {
   };
 
   /**
-   * Helper function to fetch all NFTs from a given contractAddress
-   * with optional minTokenId / maxTokenId filters.
+   * Main NFT fetching function with optimized performance.
+   * Metadata requests are parallelized via Promise.all.
    */
-  const fetchNFTsFromContract = async (
-    providedWeb3,
-    providedAccount,
-    contractAddress,
-    minTokenId = 0,
-    maxTokenId = Infinity
-  ) => {
-    const contract = new providedWeb3.eth.Contract(nftABI, contractAddress);
-    const transferEvents = await contract.getPastEvents("Transfer", {
-      fromBlock: 0,
-      toBlock: "latest",
-    });
-
-    // A set of tokenIds that ended up in `providedAccount`.
-    const userTokens = new Set();
-    transferEvents.forEach((event) => {
-      const { from, to, tokenId } = event.returnValues;
-      const numId = parseInt(tokenId, 10);
-      if (numId < minTokenId || numId > maxTokenId) {
-        return;
-      }
-      if (to.toLowerCase() === providedAccount.toLowerCase()) {
-        userTokens.add(tokenId);
-      }
-      if (from.toLowerCase() === providedAccount.toLowerCase()) {
-        userTokens.delete(tokenId);
-      }
-    });
-
-    const ownedNFTs = [];
-    for (let tokenId of userTokens) {
+  const fetchNFTs = useCallback(
+    async (
+      providedWeb3 = web3,
+      providedAccount = account,
+      contractAddress = chosenIncubation?.contractAddress
+    ) => {
+      if (!providedWeb3 || !providedAccount || !contractAddress) return;
       try {
-        const owner = await contract.methods.ownerOf(tokenId).call();
-        if (owner.toLowerCase() === providedAccount.toLowerCase()) {
-          let uri = "";
-          try {
-            uri = await contract.methods.tokenURI(tokenId).call();
-            if (uri.startsWith("ipfs://")) {
-              uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-            }
-          } catch (err) {
-            console.warn(`Could not get tokenURI for ${tokenId}`, err);
-          }
-          let image = "";
-          try {
-            const response = await fetch(uri);
-            const metadata = await response.json();
-            image = metadata.image || "";
-            if (image.startsWith("ipfs://")) {
-              image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-            }
-          } catch (err) {
-            console.warn(`Could not fetch metadata for ${tokenId}`, err);
-          }
-          ownedNFTs.push({ tokenId, tokenURI: uri, image });
-        }
-      } catch (err) {
-        console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
-      }
-    }
-    return ownedNFTs;
-  };
+        setIsLoading(true);
 
-  /**
-   * Main NFT fetching function.
-   * Updated to include silverback functionality.
-   */
-  const fetchNFTs = async (
-    providedWeb3 = web3,
-    providedAccount = account,
-    contractAddress = chosenIncubation?.contractAddress
-  ) => {
-    if (!providedWeb3 || !providedAccount || !contractAddress) return;
-    try {
-      setIsLoading(true);
-  
-      // Define contracts and their conditions based on the selected option
-      const contracts = [];
-      if (selectedOption === "rarity") {
-        contracts.push({
-          address: incubationOptions.rarity.contractAddress,
-          contract: new providedWeb3.eth.Contract(nftABI, incubationOptions.rarity.contractAddress),
-          filter: (tokenId) => true,
-        });
-      } else if (selectedOption === "gorilla") {
-        // Gorilla uses two contracts with different token ID filters.
-        contracts.push(
-          {
-            address: incubationOptions.gorilla.contractAddress,
-            contract: new providedWeb3.eth.Contract(nftABI, incubationOptions.gorilla.contractAddress),
+        // Define contracts based on the selected option.
+        const contracts = [];
+        if (selectedOption === "rarity") {
+          contracts.push({
+            address: incubationOptions.rarity.contractAddress,
+            contract: new providedWeb3.eth.Contract(
+              nftABI,
+              incubationOptions.rarity.contractAddress
+            ),
             filter: (tokenId) => true,
-          },
-          {
-            address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
-            contract: new providedWeb3.eth.Contract(nftABI, "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63"),
-            filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000,
-          }
-        );
-      } else if (selectedOption === "silverback") {
-        // For Silverback, only fetch tokens with IDs between 3000 and 4000.
-        contracts.push({
-          address: chosenIncubation.contractAddress,
-          contract: new providedWeb3.eth.Contract(nftABI, chosenIncubation.contractAddress),
-          filter: (tokenId) => tokenId >= 3000 && tokenId <= 4000,
-        });
-      }
-  
-      const ownedNFTs = [];
-      for (let { address, contract, filter } of contracts) {
-        const transferEvents = await contract.getPastEvents("Transfer", {
-          fromBlock: 0,
-          toBlock: "latest",
-        });
-        const userTokens = new Set();
-        transferEvents.forEach((event) => {
-          const { from, to, tokenId } = event.returnValues;
-          if (to.toLowerCase() === providedAccount.toLowerCase()) {
-            userTokens.add(tokenId);
-          }
-          if (from.toLowerCase() === providedAccount.toLowerCase()) {
-            userTokens.delete(tokenId);
-          }
-        });
-  
-        for (let tokenId of userTokens) {
-          if (!filter(tokenId)) continue;
-          try {
-            const owner = await contract.methods.ownerOf(tokenId).call();
-            if (owner.toLowerCase() === providedAccount.toLowerCase()) {
-              let uri = "";
-              try {
-                uri = await contract.methods.tokenURI(tokenId).call();
-                if (uri.startsWith("ipfs://")) {
-                  uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-                }
-              } catch (err) {
-                console.warn(`Could not get tokenURI for ${tokenId}`, err);
-              }
-              let image = "";
-              try {
-                const response = await fetch(uri);
-                const metadata = await response.json();
-                image = metadata.image || "";
-                if (image.startsWith("ipfs://")) {
-                  image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
-                }
-              } catch (err) {
-                console.warn(`Could not fetch metadata for ${tokenId}`, err);
-              }
-              ownedNFTs.push({ tokenId, tokenURI: uri, image, contractAddress: address });
+          });
+        } else if (selectedOption === "gorilla") {
+          contracts.push(
+            {
+              address: incubationOptions.gorilla.contractAddress,
+              contract: new providedWeb3.eth.Contract(
+                nftABI,
+                incubationOptions.gorilla.contractAddress
+              ),
+              filter: (tokenId) => true,
+            },
+            {
+              address: "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63",
+              contract: new providedWeb3.eth.Contract(
+                nftABI,
+                "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63"
+              ),
+              filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000,
             }
-          } catch (err) {
-            console.warn(`ownerOf failed for tokenId ${tokenId}`, err);
-          }
+          );
+        } else if (selectedOption === "silverback") {
+          contracts.push({
+            address: chosenIncubation.contractAddress,
+            contract: new providedWeb3.eth.Contract(
+              nftABI,
+              chosenIncubation.contractAddress
+            ),
+            filter: (tokenId) => tokenId >= 3000 && tokenId <= 4000,
+          });
         }
+
+        const ownedNFTs = [];
+
+        // Process each contract.
+        for (let { address, contract, filter } of contracts) {
+          let transferEvents = [];
+          try {
+            transferEvents = await contract.getPastEvents("Transfer", {
+              fromBlock: 0,
+              toBlock: "latest",
+            });
+          } catch (error) {
+            console.error(`Error fetching Transfer events for contract ${address}:`, error);
+            continue;
+          }
+
+          // Build a set of token IDs currently owned by the user.
+          const userTokens = new Set();
+          transferEvents.forEach((event) => {
+            const { from, to, tokenId } = event.returnValues;
+            if (to.toLowerCase() === providedAccount.toLowerCase()) {
+              userTokens.add(tokenId);
+            }
+            if (from.toLowerCase() === providedAccount.toLowerCase()) {
+              userTokens.delete(tokenId);
+            }
+          });
+
+          // Process tokens in parallel.
+          const tokenPromises = Array.from(userTokens)
+            .filter((tokenId) => filter(tokenId))
+            .map(async (tokenId) => {
+              try {
+                const owner = await contract.methods.ownerOf(tokenId).call();
+                if (owner.toLowerCase() !== providedAccount.toLowerCase()) {
+                  return null;
+                }
+                // Fetch token URI.
+                let uri = "";
+                try {
+                  uri = await contract.methods.tokenURI(tokenId).call();
+                  if (uri.startsWith("ipfs://")) {
+                    uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+                  }
+                } catch (err) {
+                  console.error(`Error fetching tokenURI for tokenId ${tokenId}:`, err);
+                  uri = "";
+                }
+                // Fetch metadata concurrently.
+                let image = "";
+                if (uri) {
+                  try {
+                    const response = await fetch(uri);
+                    if (!response.ok) {
+                      throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const metadata = await response.json();
+                    if (!metadata || !metadata.image) {
+                      throw new Error(`Invalid metadata structure for tokenId ${tokenId}`);
+                    }
+                    image = metadata.image;
+                    if (image.startsWith("ipfs://")) {
+                      image = image.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+                    }
+                  } catch (err) {
+                    console.error(`Error fetching metadata for tokenId ${tokenId}:`, err);
+                  }
+                }
+                return { tokenId, tokenURI: uri, image, contractAddress: address };
+              } catch (err) {
+                console.error(`Error processing tokenId ${tokenId} in contract ${address}:`, err);
+                return null;
+              }
+            });
+
+          const tokensResults = await Promise.all(tokenPromises);
+          tokensResults.forEach((result) => {
+            if (result !== null) {
+              ownedNFTs.push(result);
+            }
+          });
+        }
+        setNfts(ownedNFTs);
+      } catch (error) {
+        console.error("Error fetching NFTs:", error);
+        alert("An error occurred while fetching NFTs. Please try again later.");
+      } finally {
+        setIsLoading(false);
       }
-  
-      setNfts(ownedNFTs);
-    } catch (error) {
-      console.error("Error fetching NFTs:", error);
-    } finally {
-      setIsLoading(false);
+    },
+    [web3, account, chosenIncubation, selectedOption]
+  );
+
+  // Fetch NFTs when the option, wallet, or account changes.
+  useEffect(() => {
+    if (selectedOption && web3 && account && chosenIncubation?.contractAddress) {
+      fetchNFTs(web3, account, chosenIncubation.contractAddress);
+    }
+  }, [selectedOption, web3, account, chosenIncubation, fetchNFTs]);
+
+  // GSAP animation for the boxes (applies to all options)
+  useEffect(() => {
+    if (selectedOption) {
+      const tl = gsap.timeline({ repeat: -1 });
+      tl.set(".smallBox", { opacity: 0 });
+      tl.to({}, { duration: 1 });
+      tl.set(".smallBox", { opacity: 1 });
+      tl.to(".smallBox", {
+        x: 200,
+        duration: 1,
+        stagger: 0.2,
+        ease: "power1.inOut",
+      })
+        .to(
+          ".smallBox",
+          {
+            opacity: 0,
+            duration: 0.5,
+            ease: "power1.inOut",
+          },
+          "+=0.1"
+        )
+        .set(".smallBox", { x: 0, opacity: 0 })
+        .to(".mediumBox", { opacity: 1, duration: 0.1 })
+        .to(".mediumBox", { x: 350, duration: 0.8, ease: "power1.inOut" })
+        .to(".mediumBox", { opacity: 0, duration: 0.1, ease: "power1.inOut" })
+        .set(".mediumBox", { x: 0, opacity: 0 });
+    }
+  }, [selectedOption]);
+
+  const handleSelectNFT = (tokenId) => {
+    if (selectedNfts.includes(tokenId)) {
+      setSelectedNfts(selectedNfts.filter((id) => id !== tokenId));
+    } else {
+      if (selectedNfts.length < 3) {
+        setSelectedNfts([...selectedNfts, tokenId]);
+      } else {
+        alert("You can only select up to 3 NFTs.");
+      }
     }
   };
 
+  const handleIncubateClick = () => {
+    if (selectedNfts.length !== 3) {
+      alert("You must select exactly 3 NFTs before incubating.");
+      return;
+    }
+    setShowStepsOverlay(true);
+  };
+
+  // Email sending function.
   const sendEmail = async () => {
     const typeLabel =
       selectedOption === "rarity"
@@ -340,11 +407,8 @@ function App() {
     
     let success = false;
     let attempt = 0;
-    
     while (attempt < 3 && !success) {
-      // Append the retry number to the subject on retries.
       const subject = attempt > 0 ? `${baseSubject} - Retry ${attempt}` : baseSubject;
-      
       try {
         const response = await fetch(
           "https://cayc-incubator-email.vercel.app/api/send-email.js",
@@ -365,9 +429,7 @@ function App() {
         attempt++;
       }
     }
-    
     if (!success) {
-      // Append a feedback message that the transfers succeeded but the email failed.
       setTransferStatusMessage((prevMessage) =>
         (prevMessage ? prevMessage + "\n\n" : "") +
         "Note: The transfers were successful, but the email notification failed to send. Please contact admins."
@@ -375,9 +437,7 @@ function App() {
     }
   };
 
-  /**
-   * Updated error-handling logic for NFT transfers with owner verification in both loops.
-   */
+  // handleFinalIncubation: Transfer NFTs and verify the results.
   const handleFinalIncubation = async () => {
     setShowStepsOverlay(false);
     if (!web3 || !account) return;
@@ -387,7 +447,7 @@ function App() {
     let succeeded = [];
     let failed = [];
 
-    // Main transfer loop
+    // Main transfer loop.
     for (let tokenId of selectedNfts) {
       try {
         const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
@@ -402,7 +462,7 @@ function App() {
           .send({ from: account });
         succeeded.push(tokenId);
       } catch (error) {
-        // Check if the NFT was already transferred despite the error.
+        // Verify if transfer succeeded despite error.
         try {
           const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
           if (nftItem) {
@@ -422,18 +482,18 @@ function App() {
       }
     }
 
-    // If some transfers failed, offer a retry.
     if (failed.length > 0) {
       let initialMsg = "";
       if (succeeded.length > 0) {
-        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(", ")}.\n\n`;
+        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(
+          ", "
+        )}.\n\n`;
       }
       initialMsg += `The following token IDs failed to transfer: ${failed.join(
         ", "
       )}.\n\nPlease ensure you have enough ETH to cover gas fees.\nWould you like to retry transferring these failed NFTs?`;
 
       const userConfirmed = window.confirm(initialMsg);
-
       if (userConfirmed) {
         let retryFailed = [];
         for (let tokenId of failed) {
@@ -450,7 +510,6 @@ function App() {
               .send({ from: account });
             succeeded.push(tokenId);
           } catch (error) {
-            // Check again if the transfer actually succeeded.
             try {
               const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
               if (nftItem) {
@@ -497,81 +556,11 @@ function App() {
     setIsTransferring(false);
   };
 
-  // Fetch NFTs when the option, wallet, or account changes.
-  useEffect(() => {
-    if (selectedOption && web3 && account && chosenIncubation?.contractAddress) {
-      fetchNFTs(web3, account, chosenIncubation.contractAddress);
-    }
-  }, [selectedOption, web3, account]);
-
-  // GSAP animation for the boxes (applies to all options)
-  useEffect(() => {
-    if (selectedOption) {
-      const tl = gsap.timeline({ repeat: -1 });
-      tl.set(".smallBox", { opacity: 0 });
-      tl.to({}, { duration: 1 });
-      tl.set(".smallBox", { opacity: 1 });
-      tl.to(".smallBox", {
-        x: 200,
-        duration: 1,
-        stagger: 0.2,
-        ease: "power1.inOut"
-      })
-        .to(
-          ".smallBox",
-          {
-            opacity: 0,
-            duration: 0.5,
-            ease: "power1.inOut"
-          },
-          "+=0.1"
-        )
-        .set(".smallBox", { x: 0, opacity: 0 })
-        .to(".mediumBox", {
-          opacity: 1,
-          duration: 0.1
-        })
-        .to(".mediumBox", {
-          x: 350,
-          duration: 0.8,
-          ease: "power1.inOut"
-        })
-        .to(".mediumBox", {
-          opacity: 0,
-          duration: 0.1,
-          ease: "power1.inOut"
-        })
-        .set(".mediumBox", { x: 0, opacity: 0 });
-    }
-  }, [selectedOption]);
-
-  const handleSelectNFT = (tokenId) => {
-    if (selectedNfts.includes(tokenId)) {
-      setSelectedNfts(selectedNfts.filter((id) => id !== tokenId));
-    } else {
-      if (selectedNfts.length < 3) {
-        setSelectedNfts([...selectedNfts, tokenId]);
-      } else {
-        alert("You can only select up to 3 NFTs.");
-      }
-    }
-  };
-
-  const handleIncubateClick = () => {
-    if (selectedNfts.length !== 3) {
-      alert("You must select exactly 3 NFTs before incubating.");
-      return;
-    }
-    setShowStepsOverlay(true);
-  };
-
   let content;
   if (!selectedOption) {
     content = (
       <div className="menuBox">
-        <h2 style={{ color: "white", marginTop: 0 }}>
-          Choose an Incubation Option:
-        </h2>
+        <h2 style={{ color: "white", marginTop: 0 }}>Choose an Incubation Option:</h2>
         <button className="myButton" onClick={() => setSelectedOption("rarity")}>
           INCUBATE A RARITY
         </button>
@@ -648,30 +637,16 @@ function App() {
           >
             <thead>
               <tr>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  Select
-                </th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  Token ID
-                </th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  Token URI
-                </th>
-                <th style={{ border: "1px solid #ccc", padding: "8px" }}>
-                  Image
-                </th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Select</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token ID</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Token URI</th>
+                <th style={{ border: "1px solid #ccc", padding: "8px" }}>Image</th>
               </tr>
             </thead>
             <tbody>
               {nfts.map((nft) => (
                 <tr key={nft.tokenId}>
-                  <td
-                    style={{
-                      border: "1px solid #ccc",
-                      padding: "8px",
-                      textAlign: "center",
-                    }}
-                  >
+                  <td style={{ border: "1px solid #ccc", padding: "8px", textAlign: "center" }}>
                     <input
                       type="checkbox"
                       checked={selectedNfts.includes(nft.tokenId)}
@@ -780,8 +755,8 @@ function App() {
             <div className="confirmation-box">
               <h3>Transferring your selected NFTs...</h3>
               <p>
-                Please confirm <strong>each transaction</strong> in your wallet
-                to transfer the tokens to <br />
+                Please confirm <strong>each transaction</strong> in your wallet to
+                transfer the tokens to <br />
                 <em>{STAGING_WALLET}</em>.
               </p>
             </div>
