@@ -305,7 +305,7 @@ for (let { address, contract, filter } of contracts) {
                 try {
                   uri = await contract.methods.tokenURI(tokenId).call();
                   if (uri.startsWith("ipfs://")) {
-                    uri = uri.replace("ipfs://", "https://gateway.pinata.cloud/ipfs/");
+                    uri = uri.replace("ipfs://", "https://cloudflare-ipfs.com/ipfs/");
                   }
                 } catch (err) {
                   console.error(`Error fetching tokenURI for tokenId ${tokenId}:`, err);
