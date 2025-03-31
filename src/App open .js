@@ -247,18 +247,37 @@ function App() {
 
         const ownedNFTs = [];
 
-        // Process each contract.
-        for (let { address, contract, filter } of contracts) {
-          let transferEvents = [];
-          try {
-            transferEvents = await contract.getPastEvents("Transfer", {
-              fromBlock: 0,
-              toBlock: "latest",
-            });
-          } catch (error) {
-            console.error(`Error fetching Transfer events for contract ${address}:`, error);
-            continue;
-          }
+      // Process each contract.
+for (let { address, contract, filter } of contracts) {
+  let transferEvents = [];
+  try {
+    const latestBlock = Number(await providedWeb3.eth.getBlockNumber());
+
+    const chunkSize = 5000; // or 10000 max
+    let fromBlock = 0;
+    let allEvents = [];
+
+    while (fromBlock <= latestBlock) {
+      const toBlock = Math.min(fromBlock + chunkSize - 1, latestBlock);
+      try {
+        const events = await contract.getPastEvents("Transfer", {
+          fromBlock,
+          toBlock,
+        });
+        allEvents = allEvents.concat(events);
+      } catch (err) {
+        console.error(`Error fetching events from block ${fromBlock} to ${toBlock}`, err);
+        // Optional: You could break or just skip this chunk and continue
+      }
+      fromBlock = toBlock + 1;
+    }
+
+    transferEvents = allEvents;
+
+  } catch (error) {
+    console.error(`Error fetching Transfer events for contract ${address}:`, error);
+    continue;
+  }
 
           // Build a set of token IDs currently owned by the user.
           const userTokens = new Set();

@@ -251,7 +251,8 @@ function App() {
 for (let { address, contract, filter } of contracts) {
   let transferEvents = [];
   try {
-    const latestBlock = await providedWeb3.eth.getBlockNumber();
+    const latestBlock = Number(await providedWeb3.eth.getBlockNumber());
+
     const chunkSize = 5000; // or 10000 max
     let fromBlock = 0;
     let allEvents = [];
