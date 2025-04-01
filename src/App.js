@@ -252,6 +252,7 @@ function App() {
           let transferEvents = [];
           try {
             transferEvents = await contract.getPastEvents("Transfer", {
+              filter: { to: providedAccount },
               fromBlock: 0,
               toBlock: "latest",
             });
