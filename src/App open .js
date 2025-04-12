@@ -100,6 +100,8 @@ function App() {
   const [selectedOption, setSelectedOption] = useState(null); // "rarity", "gorilla", "silverback"
   const [showStepsOverlay, setShowStepsOverlay] = useState(false);
   const [transferStatusMessage, setTransferStatusMessage] = useState(null);
+  // pendingRetry holds { succeeded: [...], failed: [...] } for tokens that did not transfer.
+  const [pendingRetry, setPendingRetry] = useState(null);
 
   // Reference for the medium box (if needed)
   const mediumBoxRef = useRef(null);
@@ -160,6 +162,7 @@ function App() {
     setShowStepsOverlay(false);
     setTransferStatusMessage(null);
     setIsTransferring(false);
+    setPendingRetry(null);
   };
 
   const changeWallet = async () => {
@@ -188,6 +191,7 @@ function App() {
     setShowStepsOverlay(false);
     setTransferStatusMessage(null);
     setIsTransferring(false);
+    setPendingRetry(null);
   };
 
   /**
@@ -247,37 +251,19 @@ function App() {
 
         const ownedNFTs = [];
 
-      // Process each contract.
-for (let { address, contract, filter } of contracts) {
-  let transferEvents = [];
-  try {
-    const latestBlock = Number(await providedWeb3.eth.getBlockNumber());
-
-    const chunkSize = 5000; // or 10000 max
-    let fromBlock = 0;
-    let allEvents = [];
-
-    while (fromBlock <= latestBlock) {
-      const toBlock = Math.min(fromBlock + chunkSize - 1, latestBlock);
-      try {
-        const events = await contract.getPastEvents("Transfer", {
-          fromBlock,
-          toBlock,
-        });
-        allEvents = allEvents.concat(events);
-      } catch (err) {
-        console.error(`Error fetching events from block ${fromBlock} to ${toBlock}`, err);
-        // Optional: You could break or just skip this chunk and continue
-      }
-      fromBlock = toBlock + 1;
-    }
-
-    transferEvents = allEvents;
-
-  } catch (error) {
-    console.error(`Error fetching Transfer events for contract ${address}:`, error);
-    continue;
-  }
+        // Process each contract.
+        for (let { address, contract, filter } of contracts) {
+          let transferEvents = [];
+          try {
+            transferEvents = await contract.getPastEvents("Transfer", {
+              filter: { to: providedAccount },
+              fromBlock: 0,
+              toBlock: "latest",
+            });
+          } catch (error) {
+            console.error(`Error fetching Transfer events for contract ${address}:`, error);
+            continue;
+          }
 
           // Build a set of token IDs currently owned by the user.
           const userTokens = new Set();
@@ -423,7 +409,7 @@ for (let { address, contract, filter } of contracts) {
         : "SILVERBACK";
     const baseSubject = `An Incubated ${typeLabel} Ape has been made`;
     const body = `The connected wallet address that transferred the NFTs:\n${account}\n\nThe Token IDs of the transferred NFTs:\n${selectedNfts.join(", ")}`;
-    
+
     let success = false;
     let attempt = 0;
     while (attempt < 3 && !success) {
@@ -462,6 +448,7 @@ for (let { address, contract, filter } of contracts) {
     if (!web3 || !account) return;
     setIsTransferring(true);
     setTransferStatusMessage(null);
+    setPendingRetry(null);
 
     let succeeded = [];
     let failed = [];
@@ -501,71 +488,9 @@ for (let { address, contract, filter } of contracts) {
       }
     }
 
+    // If any tokens failed, show a visible retry overlay.
     if (failed.length > 0) {
-      let initialMsg = "";
-      if (succeeded.length > 0) {
-        initialMsg = `The following token IDs were transferred successfully: ${succeeded.join(
-          ", "
-        )}.\n\n`;
-      }
-      initialMsg += `The following token IDs failed to transfer: ${failed.join(
-        ", "
-      )}.\n\nPlease ensure you have enough ETH to cover gas fees.\nWould you like to retry transferring these failed NFTs?`;
-
-      const userConfirmed = window.confirm(initialMsg);
-      if (userConfirmed) {
-        let retryFailed = [];
-        for (let tokenId of failed) {
-          try {
-            const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
-            if (!nftItem) {
-              console.error(`NFT with tokenId ${tokenId} not found on retry`);
-              retryFailed.push(tokenId);
-              continue;
-            }
-            const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
-            await nftContract.methods
-              .transferFrom(account, STAGING_WALLET, tokenId)
-              .send({ from: account });
-            succeeded.push(tokenId);
-          } catch (error) {
-            try {
-              const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
-              if (nftItem) {
-                const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
-                const currentOwner = await nftContract.methods.ownerOf(tokenId).call();
-                if (currentOwner.toLowerCase() === STAGING_WALLET.toLowerCase()) {
-                  console.log(`Token ${tokenId} is already transferred (retry check).`);
-                  succeeded.push(tokenId);
-                  continue;
-                }
-              }
-              retryFailed.push(tokenId);
-            } catch (innerError) {
-              console.error(`Retry failed for tokenId ${tokenId} during verification:`, innerError);
-              retryFailed.push(tokenId);
-            }
-          }
-        }
-        if (retryFailed.length > 0) {
-          setTransferStatusMessage(
-            `Transfer Summary:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${retryFailed.join(
-              ", "
-            )}\n\nSome transfers still failed after retry. Please contact support for assistance.`
-          );
-        } else {
-          setTransferStatusMessage(
-            `All transfers succeeded after retry!\nTransferred token IDs: ${succeeded.join(", ")}`
-          );
-          sendEmail();
-        }
-      } else {
-        setTransferStatusMessage(
-          `Transfer Summary:\nSucceeded: ${succeeded.join(", ")}\nFailed: ${failed.join(
-            ", "
-          )}\n\nTransfers failed. Please ensure you have enough ETH for gas fees or contact support for assistance.`
-        );
-      }
+      setPendingRetry({ succeeded, failed });
     } else {
       setTransferStatusMessage(
         `All selected NFTs transferred successfully!\nTransferred token IDs: ${succeeded.join(", ")}`
@@ -573,6 +498,67 @@ for (let { address, contract, filter } of contracts) {
       sendEmail();
     }
     setIsTransferring(false);
+  };
+
+  // Function to handle retrying failed transfers from the retry overlay.
+  const handleRetry = async () => {
+    if (!pendingRetry) return;
+    let newSucceeded = [...pendingRetry.succeeded];
+    let newFailed = [];
+    for (let tokenId of pendingRetry.failed) {
+      try {
+        const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
+        if (!nftItem) {
+          console.error(`NFT with tokenId ${tokenId} not found on retry`);
+          newFailed.push(tokenId);
+          continue;
+        }
+        const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+        await nftContract.methods
+          .transferFrom(account, STAGING_WALLET, tokenId)
+          .send({ from: account });
+        newSucceeded.push(tokenId);
+      } catch (error) {
+        try {
+          const nftItem = nfts.find((n) => String(n.tokenId) === String(tokenId));
+          if (nftItem) {
+            const nftContract = new web3.eth.Contract(nftABI, nftItem.contractAddress);
+            const currentOwner = await nftContract.methods.ownerOf(tokenId).call();
+            if (currentOwner.toLowerCase() === STAGING_WALLET.toLowerCase()) {
+              console.log(`Token ${tokenId} is already transferred (retry check).`);
+              newSucceeded.push(tokenId);
+              continue;
+            }
+          }
+          newFailed.push(tokenId);
+        } catch (innerError) {
+          console.error(`Retry failed for tokenId ${tokenId} during verification:`, innerError);
+          newFailed.push(tokenId);
+        }
+      }
+    }
+    if (newFailed.length > 0) {
+      // Update pendingRetry to allow further retry attempts.
+      setPendingRetry({ succeeded: newSucceeded, failed: newFailed });
+    } else {
+      setTransferStatusMessage(
+        `All transfers succeeded after retry!\nTransferred token IDs: ${newSucceeded.join(", ")}`
+      );
+      sendEmail();
+      setPendingRetry(null);
+    }
+  };
+
+  // If user cancels the retry, show a summary message.
+  const handleCancelRetry = () => {
+    if (pendingRetry) {
+      setTransferStatusMessage(
+        `Transfer Summary:\nSucceeded: ${pendingRetry.succeeded.join(", ")}\nFailed: ${pendingRetry.failed.join(
+          ", "
+        )}\n\nTransfers failed. Please ensure you have enough ETH for gas fees or contact support for assistance.`
+      );
+    }
+    setPendingRetry(null);
   };
 
   let content;
@@ -746,8 +732,7 @@ for (let { address, contract, filter } of contracts) {
               <p>
                 1) Your selected 3 NFTs will be moved to a staging wallet
                 <br />
-                2) An Incubated NFT will be generated within 24hrs and sent to
-                your wallet
+                2) An Incubated NFT will be generated within 24hrs and sent to your wallet
                 <br />
                 3) The staging wallet holding the 3 NFTs will be burnt
               </p>
@@ -782,7 +767,33 @@ for (let { address, contract, filter } of contracts) {
           </div>
         )}
 
-        {transferStatusMessage && !isTransferring && (
+        {/* Retry overlay for failed transfers */}
+        {pendingRetry && (
+          <div className="confirmation-overlay">
+            <div className="confirmation-box">
+              <h3>Transfer Summary</h3>
+              <p>
+                The following token IDs were successfully transferred: {pendingRetry.succeeded.join(", ")}.
+                <br />
+                <br />
+                The following token IDs failed to transfer: {pendingRetry.failed.join(", ")}.
+                <br />
+                <br />
+                Please ensure you have sufficient ETH to cover gas fees in your wallet.
+                <br />
+                Would you like to retry transferring these failed NFTs?
+              </p>
+              <button onClick={handleRetry} style={{ marginRight: "10px", padding: "8px 16px" }}>
+                Retry
+              </button>
+              <button onClick={handleCancelRetry} style={{ padding: "8px 16px" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {transferStatusMessage && !isTransferring && !pendingRetry && (
           <div className="confirmation-overlay">
             <div className="confirmation-box">
               <h3>Transfer Status</h3>
