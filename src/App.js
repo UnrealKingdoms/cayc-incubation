@@ -235,7 +235,7 @@ function App() {
                 nftABI,
                 "0xdb5c9ac6089d6cca205f54ee19bd151e419cac63"
               ),
-              filter: (tokenId) => tokenId >= 1000 && tokenId <= 2000,
+              filter: (tokenId) => tokenId >= 1000 && tokenId <= 3000,
             }
           );
         } else if (selectedOption === "silverback") {
