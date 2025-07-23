@@ -359,7 +359,7 @@ function App() {
               <p>
                 1) Your selected 3 NFTs will be moved to a staging wallet
                 <br />
-                2) An Incubated NFT will be generated within 24hrs and sent to
+                2) An Incubated NFT will be generated within 72hrs and sent to
                 your wallet
                 <br />
                 3) The staging wallet holding the 3 NFTs will be burnt
